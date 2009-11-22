@@ -359,7 +359,7 @@ get_known_users();
 
 $(function()
 {
-  $('#add_bill_date').datePicker({startDate:'01/01/1996'});
+  $('#add_bill_date').datePicker({startDate:'1996-01-01'});
 });
 
 
@@ -467,7 +467,7 @@ function edit_old_bill(ident) {
 	val = item.innerHTML;
 	if (cl == "old_bill_date") {
 	    item.innerHTML = "<input class=\"date-pick\" id=\"" + id + "_edit\" + value=\"" + val + "\">";
-	    $('#' + id + "_edit").datePicker({startDate: '01/01/1996'});
+	    $('#' + id + "_edit").datePicker({startDate: '1996-01-01'});
 	} else if (cl == "old_bill_description") {
 	    item.innerHTML = "<input id=\"" + id + "_edit\" value=\"" + val + "\">";
 	} else if (cl == "old_bill_uname") {
