@@ -17,6 +17,8 @@ import Text.ParserCombinators.Parsec.Char
 
 import Debug.Trace
 
+deriving instance Show JSON
+
 instance ToJSON a => ToJSON [a] where
     toJSON xs = JList $ map toJSON xs
 
@@ -33,7 +35,7 @@ jsonResponse :: JSON -> BSL.ByteString
 jsonResponse = stringToBSL. jsonToString
 
 forceMaybe :: Maybe a -> a
-forceMaybe = maybe (error "whoops") id
+forceMaybe = maybe (error "whoops forced Nothing") id
 
 forceLookup :: Eq a => a -> [(a, b)] -> b
 forceLookup key table = forceMaybe $ lookup key table
@@ -45,11 +47,6 @@ lookupDefault key table def =
 filterCharacterUname :: Char -> Char
 filterCharacterUname x | (isAlpha x || isDigit x || x == '_') = x
                        | otherwise = '_'
-
-filterCharacterFullName :: Char -> Char
-filterCharacterFullName x | (isAlpha x || isDigit x || x == '_' || x == ' ')
-                              = x
-                          | otherwise = '_'
 
 jsonError :: String -> JSON
 jsonError msg = JObj [("result", JString "error"),
@@ -63,17 +60,18 @@ simpleSuccess what = return $ resultBS 200 $ jsonResponse $
                      JObj [("result", JString "okay"),
                            ("data", toJSON what)]
 
+trivialSuccess :: Monad m => m Response
+trivialSuccess = return $ resultBS 200 $ jsonResponse $
+                 JObj [("result", JString "okay")]
+
 handle_get_user_list :: (MonadIO m) => SQLiteHandle -> m Response
 handle_get_user_list db =
     let doOneEntry :: Row String -> JSON
         doOneEntry r =
-            let uname = forceLookup "username" r
-                fullname = forceLookup "fullname" r
-            in JObj [("uname", JString uname),
-                     ("fullname", JString fullname)]
+            JObj [("uname", JString $ forceLookup "username" r)]
     in
     do res <- liftIO $ execStatement db
-              "select \"username\", \"fullname\" from users;"
+              "select \"username\" from users;"
        return $ resultBS 200 $ jsonResponse $
         case res of
          Left msg -> jsonError msg
@@ -83,7 +81,7 @@ handle_get_user_list db =
 getInput :: Request -> String -> String
 getInput rq key =
     let res = inputValue $ forceLookup key $ rqInputs rq
-    in if BSL.length res > 100 then "_too_long_"
+    in if BSL.length res > 10000 then "_too_long_"
        else bslToString res
 
 handle_remove_user :: (MonadIO m) => SQLiteHandle -> Request -> m Response
@@ -235,8 +233,8 @@ instance ToJSON BillEntry where
                       ("date", JString $ be_date be),
                       ("description", JString $be_description be),
                       ("charges", JList [JObj [("ident", JInt ident),
-                                               ("fullname", JString user),
-                                               ("charge", (JFloat $ realToFrac charge))]
+                                               ("charge", (JFloat $ realToFrac charge)),
+                                               ("uname", (JString user))]
                                                |
                                                (ident, user, charge) <- be_charges be])]
 
@@ -250,15 +248,7 @@ handle_old_bills db =
                 case charges' of
                   Left msg -> simpleError msg
                   Right charges ->
-                      let lookupUser uname =
-                             do r <- liftIO $ execParamStatement db
-                                     "select fullname from users where username = :uname;"
-                                     [((":uname"), (Text uname))]
-                                case r of
-                                  Right ([r']:_) ->
-                                      return $ snd $ head $ r'
-                                  _ -> return $ "unknown user " ++ uname
-
+                      let 
                           formatCharge charge =
                               (fromInteger $ toInteger ident, bill, user, amount) where
                                   (Int ident) = forceLookup "chargeident" charge
@@ -272,18 +262,57 @@ handle_old_bills db =
                                   (Text description) = forceLookup "description" bill
                           formattedCharges = map formatCharge $ concat charges
                           formattedBills = map formatBill $ concat bills
-                      in do translatedCharges <- mapM (\(i, a, b, c) ->
-                                                           do b' <- lookupUser b
-                                                              return (i, a, b', c))
-                                                 formattedCharges
+                      in do 
                             let chargesForBill bill =
                                     [(ident, user, realToFrac amount) |
-                                     (ident, bill', user, amount) <- translatedCharges, bill' == bill]
+                                     (ident, bill', user, amount) <- formattedCharges, bill' == bill]
                                 result =
                                     map (\(ident, date, description) ->
                                              BillEntry (fromInteger $ toInteger ident) date description (chargesForBill ident)) formattedBills
                             simpleSuccess result
 
+
+composeNothings :: Monad m => m (Maybe x) -> m (Maybe x) -> m (Maybe x)
+composeNothings l r =
+    l >>= maybe r (return . Just)
+
+
+composeLNothings :: Monad m => [m (Maybe x)] -> m (Maybe x)
+composeLNothings = foldr1 composeNothings
+
+execStatements_ :: SQLiteHandle -> [(String, [(String, Value)])] -> IO (Maybe String)
+execStatements_ db xs =
+    composeLNothings $ map (uncurry $ execParamStatement_ db) xs
+
+handle_change_bill :: MonadIO m => SQLiteHandle -> Request -> m Response
+handle_change_bill db rq =
+    let description = getInput rq "description"
+        date = getInput rq "date"
+        ident :: Integer
+        ident = read $ getInput rq "id"
+        charges = parseJsonChargeRecords $ forceMaybe $ parseJSON $ getInput rq "charges"
+        tot_amount = sum $ map cr_amount charges
+        insertCharge charge =
+            ("INSERT INTO charges (\"bill\", \"user\", \"amount\") values (:bill, :user, :amount);",
+             [(":bill", Int $ fromInteger ident),
+              (":user", Text $ cr_user charge),
+              (":amount", Double $ cr_amount charge)])
+    in
+      if tot_amount < -0.01 || tot_amount > 0.01
+      then simpleError $ "expected total to be zero; was " ++ (show tot_amount)
+      else
+          do res <- liftIO $ sqlTransaction db $
+                    execStatements_ db $
+                      [("UPDATE bills SET date = :date, description = :description WHERE billident = :ident;",
+                        [(":date", Text date),
+                         (":description", Text description),
+                         (":ident", Int $ fromInteger ident)]),
+                       ("DELETE FROM charges WHERE bill = :billident",
+                        [(":billident", Int $ fromInteger ident)])] ++
+                      map insertCharge charges
+             case res of
+               Nothing -> trivialSuccess
+               Just msg -> simpleError msg
 
 handle_add_user :: (MonadIO m) => SQLiteHandle -> Request -> m Response
 handle_add_user db rq =
@@ -293,11 +322,10 @@ handle_add_user db rq =
                               then "_too_long_"
                               else bslToString (inputValue x)) inputs
         uname = map filterCharacterUname $ lookupDefault "username" saneInputs ""
-        fullname = map filterCharacterFullName $ lookupDefault "full_name" saneInputs ""
     in
     do res <- liftIO $ execParamStatement_ db
-              "insert into users (\"username\", \"fullname\") values (:user, :full);"
-              [(":user", Text uname), (":full", Text fullname)]
+              "insert into users (\"username\") values (:user);"
+              [(":user", Text uname)]
        return $ resultBS 200 $ jsonResponse $ JObj $ 
               case res of
                 Nothing -> [("result", JString "okay")]
@@ -323,6 +351,8 @@ main =
                                     [withRequest $ handle_remove_user db],
                                 dir "add_bill"
                                     [withRequest $ handle_add_bill db],
+                                dir "change_bill"
+                                    [withRequest $ handle_change_bill db],
                                 dir "old_bills"
                                     [handle_old_bills db]
                                ]
