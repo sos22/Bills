@@ -169,6 +169,7 @@ function add_bill_submit() {
 		  err("Added bill " + description);
 		  reset_add_bill();
 		  get_old_bills();
+		  get_known_users();
 		} else {
 		  err("Adding bill " + description + ": " + data.error);
 		}
@@ -227,6 +228,9 @@ function add_bill_submit() {
 	<div id="add_bill_error"></div>
       </form>
     </div>
+  </li>
+  <li> <a onclick="toggle_visible(&quot;balances&quot;)">Balances</a>
+    <div id="balances"></div>
   </li>
   <li> <a onclick="toggle_visible(&quot;old_bills&quot;)">Old bills</a>
     <div id="old_bills"></div>
@@ -308,6 +312,18 @@ function refresh_bill_split() {
   newContents += "</ul>";
   $("#add_bill_whom_custom_split").html(newContents);
 }
+function refresh_balances() {
+    elem = $("#balances");
+    contents = "<table>";
+    for (u in known_users) {
+	contents += "<tr>";
+	contents += "<td>" + known_users[u].uname + "</td>";
+	contents += "<td>" + known_users[u].balance + "</td>";
+	contents += "</tr>";
+    }
+    contents += "</table>";
+    elem.html(contents);
+}
 function get_known_users() {
   jQuery.getJSON("action/get_user_list", {},
     function(data, textStatus) {
@@ -315,6 +331,7 @@ function get_known_users() {
         known_users = data.data;
 	refresh_known_users();
 	refresh_bill_split();
+	refresh_balances();
       } else {
         $("#known_user_list").text("Error " + data.error + " getting user list");
       }
@@ -526,6 +543,7 @@ function done_old_bill(ident) {
 		    if (data.result == "okay") {
 			err("Done.");
 			get_old_bills();
+			get_known_users();
 		    } else {
 			err("Saving bill: " + data.error);
 		    }

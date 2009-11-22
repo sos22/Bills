@@ -64,19 +64,50 @@ trivialSuccess :: Monad m => m Response
 trivialSuccess = return $ resultBS 200 $ jsonResponse $
                  JObj [("result", JString "okay")]
 
+findBalance :: SQLiteHandle -> String -> IO (Either String Double)
+findBalance db uname =
+    do charges <- execParamStatement db
+                  "SELECT amount FROM charges WHERE user = :user"
+                  [(":user", Text uname)]
+       case charges of
+         Left msg -> return (Left msg)
+         Right r ->
+             let unwrap :: Row Value -> Double
+                 unwrap xs =
+                     let (Double r) = snd $ head xs
+                     in r
+             in
+               return $ Right $ sum $ map (unwrap) $ concat r
+
 handle_get_user_list :: (MonadIO m) => SQLiteHandle -> m Response
 handle_get_user_list db =
-    let doOneEntry :: Row String -> JSON
+    let doOneEntry :: Row String -> IO (Either String JSON)
         doOneEntry r =
-            JObj [("uname", JString $ forceLookup "username" r)]
+            let uname = forceLookup "username" r
+            in
+              do balance <- findBalance db uname
+                 case balance of
+                   Left msg -> return (Left msg)
+                   Right bal ->
+                       return $ Right $ JObj [("uname", JString $ forceLookup "username" r),
+                                              ("balance", JFloat $ realToFrac bal)]
     in
     do res <- liftIO $ execStatement db
               "select \"username\" from users;"
-       return $ resultBS 200 $ jsonResponse $
-        case res of
-         Left msg -> jsonError msg
-         Right r -> JObj [("result", JString "okay"),
-                          ("data", JList $ map doOneEntry $ concat r)]
+       case res of
+         Left msg ->
+             simpleError msg
+         Right r ->
+             do resData <- liftIO $ mapM doOneEntry $ concat r
+                let deEither [] = Right []
+                    deEither ((Left msg):_) = Left msg
+                    deEither ((Right x):xs) =
+                        case deEither xs of
+                          Left msg -> Left msg
+                          Right xs' -> Right (x:xs')
+                case deEither resData of
+                    Left msg -> simpleError msg
+                    Right r -> simpleSuccess $ JList r
 
 getInput :: Request -> String -> String
 getInput rq key =
