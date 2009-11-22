@@ -271,11 +271,11 @@ instance ToJSON BillEntry where
 
 handle_old_bills :: (MonadIO m) => SQLiteHandle -> m Response
 handle_old_bills db =
-    do bills' <- liftIO $ execStatement db "select * from bills;"
+    do bills' <- liftIO $ execStatement db "SELECT * FROM bills ORDER BY date DESC;"
        case bills' of
          Left msg -> simpleError msg
          Right bills ->
-             do charges' <- liftIO $ execStatement db "select * from charges;"
+             do charges' <- liftIO $ execStatement db "SELECT * FROM CHARGES;"
                 case charges' of
                   Left msg -> simpleError msg
                   Right charges ->
