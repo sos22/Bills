@@ -403,7 +403,11 @@ function refresh_old_bills() {
     new_contents += "<td id=\"" + ident("date") + "\" class=\"old_bill_date\">" + bi.date + "</td>";
     new_contents += "<td id=\"" + ident("description") + "\" class=\"old_bill_description\">" + bi.description + "</td>";
     var c = bi.charges;
-    new_contents += show_charge(c[0]) + "<td id=\"" + ident("edit") + "\" class=\"old_bill_edit\"><div onclick=\"edit_old_bill(" + bi.ident + ")\">Edit</div></td></tr>";
+    if (c.length > 0)
+	new_contents += show_charge(c[0]);
+    else
+	new_contents += "<td/><td/>";
+    new_contents += "<td id=\"" + ident("edit") + "\" class=\"old_bill_edit\"><div onclick=\"edit_old_bill(" + bi.ident + ")\">Edit</div></td></tr>";
     for (index = 1; index < c.length; index++) {
        ch = c[index];
        new_contents += "<tr><td colspan=2 />" + show_charge(ch) + "</tr>";
