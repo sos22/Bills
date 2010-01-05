@@ -204,6 +204,18 @@ sqlTransaction db body =
                   Just x -> trace ("failed to commit: " ++ x) $ sqlTransaction db body
                   Nothing -> return result
 
+deMaybe :: [Maybe x] -> [x]
+deMaybe [] = []
+deMaybe (Just x : xs) = x:(deMaybe xs)
+deMaybe (Nothing:xs) = deMaybe xs
+
+maybeErrListToMaybeErr :: [Maybe String] -> Maybe String
+maybeErrListToMaybeErr errs =
+    let errs' = deMaybe errs in
+    case errs' of
+      [] -> Nothing
+      _ -> Just $ foldr (\a b -> a ++ ", " ++ b) "" errs'
+
 handle_add_bill :: (MonadIO m) => SQLiteHandle -> Request -> m Response
 handle_add_bill db rq =
     let description = getInput rq "description"
@@ -228,9 +240,6 @@ handle_add_bill db rq =
                  [(":bill", Int $ fromInteger bill),
                   (":user", Text $ cr_user cr),
                   (":amount", Double (- (cr_amount cr)))]
-        deMaybe [] = []
-        deMaybe (Just x : xs) = x:(deMaybe xs)
-        deMaybe (Nothing:xs) = deMaybe xs
 
     in if abs (tot_pay - tot_recv) > 0.01
        then return $ resultBS 200 $ jsonResponse $ jsonError $ "Total payment " ++ (show tot_pay) ++ " doesn't match total receipt " ++ (show tot_recv)
@@ -245,10 +254,7 @@ handle_add_bill db rq =
                               do bill <- getLastRowID db
                                  r2 <- mapM (insertPay bill) to_pay
                                  r3 <- mapM (insertReceive bill) to_receive
-                                 let errs = deMaybe r2 ++ deMaybe r3
-                                 case errs of
-                                   [] -> return Nothing
-                                   _ -> return $ Just $ foldr (\a b -> a ++ ", " ++ b) "" errs
+                                 return $ maybeErrListToMaybeErr (r2 ++ r3)
               return $ resultBS 200 $ jsonResponse $
                      case res of
                        Nothing -> JObj [("result", JString "okay")]
@@ -345,6 +351,60 @@ handle_change_bill db rq =
                Nothing -> trivialSuccess
                Just msg -> simpleError msg
 
+get_bill_date_description :: SQLiteHandle -> Integer -> IO (String, String)
+get_bill_date_description db ident =
+    do (bills::(Either String [[Row Value]])) <-
+           execParamStatement db "SELECT \"date\", \"description\" FROM bills WHERE billident = :ident ORDER BY date DESC;"
+                [(":ident", Int $ fromInteger ident)]
+       case bills of 
+         Left msg -> error msg
+         Right [] -> error ("bill " ++ (show ident) ++ " doesn't exist")
+         Right [x] ->
+             let unwrap :: Maybe Value -> String
+                 unwrap (Just (Text s)) = s
+                 x' = concat x
+                 date = unwrap $ lookup "date" x'
+                 description = unwrap $ lookup "description" x'
+             in return (date, description)
+             
+
+handle_clone_bill :: (MonadIO m) => SQLiteHandle -> Request -> m Response
+handle_clone_bill db rq =
+    let ident = read $ getInput rq "id"
+    in
+      do (date, description) <- liftIO $ get_bill_date_description db ident
+         charges' <- liftIO $ execParamStatement db "SELECT \"user\", \"amount\" FROM charges WHERE bill = :ident;"
+                     [(":ident", Int $ fromInteger ident)]
+         case charges' of
+           Left msg -> simpleError msg
+           Right charges ->
+               let formatCharge charge =
+                          (user, amount) where
+                              (Text user) = forceLookup "user" charge
+                              (Double amount) = forceLookup "amount" charge
+                   formattedCharges = map formatCharge $ concat charges
+                   insertCharge bill (user, amount) =
+                       execParamStatement_ db
+                          "INSERT INTO charges (\"bill\", \"user\", \"amount\") VALUES (:bill, :user, :amount);"
+                          [(":bill", Int $ fromInteger bill),
+                           (":user", Text user),
+                           (":amount", Double amount)]
+               in do res <- liftIO $ sqlTransaction db $
+                            do r1 <- execParamStatement_ db
+                                     "INSERT INTO bills (\"date\", \"description\") VALUES (:date, :description);"
+                                     [(":date", Text date),
+                                      (":description", Text description)]
+                               case r1 of
+                                 Just err -> return $ Just err
+                                 Nothing ->
+                                     do bill <- getLastRowID db
+                                        r2 <- mapM (insertCharge bill) formattedCharges
+                                        return $ maybeErrListToMaybeErr r2
+                     return $ resultBS 200 $ jsonResponse $
+                            case res of
+                              Nothing -> JObj [("result", JString "okay")]
+                              Just err -> jsonError err
+
 handle_add_user :: (MonadIO m) => SQLiteHandle -> Request -> m Response
 handle_add_user db rq =
     let inputs = rqInputs rq
@@ -384,6 +444,8 @@ main =
                                     [withRequest $ handle_add_bill db],
                                 dir "change_bill"
                                     [withRequest $ handle_change_bill db],
+                                dir "clone_bill"
+                                    [withRequest $ handle_clone_bill db],
                                 dir "old_bills"
                                     [handle_old_bills db]
                                ]

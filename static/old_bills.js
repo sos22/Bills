@@ -23,7 +23,8 @@ function refresh_old_bills() {
 	new_contents += show_charge(c[0]);
     else
 	new_contents += "<td/><td/>";
-    new_contents += "<td id=\"" + ident("edit") + "\" class=\"old_bill_edit\"><div onclick=\"edit_old_bill(" + bi.ident + ")\">Edit</div></td></tr>";
+    new_contents += "<td id=\"" + ident("edit") + "\" class=\"old_bill_edit\"><div onclick=\"edit_old_bill(" + bi.ident + ")\">Edit</div></td>";
+    new_contents += "<td id=\"" + ident("clone") + "\" class=\"old_bill_clone\"><div onclick=\"clone_old_bill(" + bi.ident + ")\">Clone</div></td></tr>";
     for (index = 1; index < c.length; index++) {
        ch = c[index];
        new_contents += "<tr><td colspan=2 />" + show_charge(ch) + "</tr>";
@@ -166,6 +167,17 @@ function done_old_bill(ident) {
 			get_known_users();
 		    } else {
 			err("Saving bill: " + data.error);
+		    }
+		}, "json");
+}
+
+function clone_old_bill(ident) {
+    jQuery.post("action/clone_bill",
+		{"id": parseInt(ident) },
+		function(data) {
+		    if (data.result == "okay") {
+			get_old_bills();
+			get_known_users();
 		    }
 		}, "json");
 }
