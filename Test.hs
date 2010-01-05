@@ -389,5 +389,8 @@ main =
                                ]
                       , fileServe ["index.html", "jquery.js",
                                    "data.js", "jquery.bgiframe.js",
-                                   "jquery.datePicker.js"] "static"
+                                   "jquery.datePicker.js", "user_admin.js",
+                                   "util.js", "old_bills.js", "add_bill.js",
+                                   "balances.js"]
+                                      "static"
                       ]
