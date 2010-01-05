@@ -368,6 +368,21 @@ get_bill_date_description db ident =
              in return (date, description)
              
 
+handle_remove_bill :: (MonadIO m) => SQLiteHandle -> Request -> m Response
+handle_remove_bill db rq =
+    let ident = read $ getInput rq "id"
+    in do res <- liftIO $ sqlTransaction db $
+                 do r1 <- execParamStatement_ db
+                          "DELETE FROM charges WHERE bill = :ident"
+                          [(":ident", Int ident)]
+                    r2 <- execParamStatement_ db
+                          "DELETE FROM bills WHERE billident = :ident"
+                          [(":ident", Int ident)]
+                    return $ maybeErrListToMaybeErr [r1, r2]
+          case res of
+            Nothing -> trivialSuccess
+            Just msg -> simpleError msg
+            
 handle_clone_bill :: (MonadIO m) => SQLiteHandle -> Request -> m Response
 handle_clone_bill db rq =
     let ident = read $ getInput rq "id"
@@ -447,7 +462,9 @@ main =
                                 dir "clone_bill"
                                     [withRequest $ handle_clone_bill db],
                                 dir "old_bills"
-                                    [handle_old_bills db]
+                                    [handle_old_bills db],
+                                dir "remove_bill"
+                                    [withRequest $ handle_remove_bill db]
                                ]
                       , fileServe ["index.html", "jquery.js",
                                    "data.js", "jquery.bgiframe.js",

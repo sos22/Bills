@@ -24,6 +24,7 @@ function refresh_old_bills() {
     else
 	new_contents += "<td/><td/>";
     new_contents += "<td id=\"" + ident("edit") + "\" class=\"old_bill_edit\"><div onclick=\"edit_old_bill(" + bi.ident + ")\">Edit</div></td>";
+    new_contents += "<td id=\"" + ident("remove") + "\" class=\"old_bill_remove\"><div onclick=\"remove_old_bill(" + bi.ident + ")\">Remove</div></td>";
     new_contents += "<td id=\"" + ident("clone") + "\" class=\"old_bill_clone\"><div onclick=\"clone_old_bill(" + bi.ident + ")\">Clone</div></td></tr>";
     for (index = 1; index < c.length; index++) {
        ch = c[index];
@@ -173,6 +174,17 @@ function done_old_bill(ident) {
 
 function clone_old_bill(ident) {
     jQuery.post("action/clone_bill",
+		{"id": parseInt(ident) },
+		function(data) {
+		    if (data.result == "okay") {
+			get_old_bills();
+			get_known_users();
+		    }
+		}, "json");
+}
+
+function remove_old_bill(ident) {
+    jQuery.post("action/remove_bill",
 		{"id": parseInt(ident) },
 		function(data) {
 		    if (data.result == "okay") {
