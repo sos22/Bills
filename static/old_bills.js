@@ -25,8 +25,10 @@ function refresh_old_bills() {
 	new_contents += show_charge(c[0]);
     else
 	new_contents += "<td/><td/>";
-    new_contents += "<td id=\"" + ident("edit") + "\" class=\"old_bill_edit\"><div onclick=\"edit_old_bill(" + bi.ident + ")\">Edit</div></td>";
-    new_contents += "<td id=\"" + ident("remove") + "\" class=\"old_bill_remove\"><div onclick=\"remove_old_bill(" + bi.ident + ")\">Remove</div></td>";
+    if (bi.owner.toLowerCase() == uname.toLowerCase()) {
+	new_contents += "<td id=\"" + ident("edit") + "\" class=\"old_bill_edit\"><div onclick=\"edit_old_bill(" + bi.ident + ")\">Edit</div></td>";
+	new_contents += "<td id=\"" + ident("remove") + "\" class=\"old_bill_remove\"><div onclick=\"remove_old_bill(" + bi.ident + ")\">Remove</div></td>";
+    }
     new_contents += "<td id=\"" + ident("clone") + "\" class=\"old_bill_clone\"><div onclick=\"clone_old_bill(" + bi.ident + ")\">Clone</div></td></tr>";
     for (index = 1; index < c.length; index++) {
        ch = c[index];
@@ -57,7 +59,7 @@ function add_new_charge_to_bill(ident) {
     new_entry = document.createElement('tr');
     new_entry.setAttribute("id", "old_bill_" + ident + "_new_charge_tr");
     cell1 = document.createElement('td');
-    cell1.setAttribute("colspan", 2);
+    cell1.setAttribute("colspan", 3);
     new_entry.appendChild(cell1);
     cell2 = document.createElement('td');
     dropbox = document.createElement('select');
@@ -203,7 +205,7 @@ function blur_oldbill_new_charge(ident) {
     charge = $("#old_bill_" + ident + "_new_charge_charge").get(0).value;
     if (user == "New charge...")
 	return;
-    content = "<td colspan=\"2\">";
+    content = "<td colspan=\"3\">";
     content += "<td id=\"old_bill_" + ident + "_A" + new_charge_ident + "\" class=\"old_bill_uname\">";
     content += "<select id=\"old_bill_" + ident + "_uname_A" + new_charge_ident + "_edit\">";
     for (u in _known_users) {

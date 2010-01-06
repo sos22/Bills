@@ -12,6 +12,7 @@ import Database.SQLite
 import Data.IORef
 import Random
 import System.IO.Unsafe
+import GHC.Int
 import Text.ParserCombinators.Parsec.Combinator
 import Text.ParserCombinators.Parsec.Prim hiding (getInput)
 import Text.ParserCombinators.Parsec.Token
@@ -259,7 +260,7 @@ handle_add_bill db rq =
                                (":description", Text description),
                                (":owner", Text my_uname)]
                         case r1 of
-                          Just err -> return $ Just err
+                          Just err -> return $ Just ("creating bill owned by " ++ my_uname ++ ": " ++ err)
                           Nothing ->
                               do bill <- getLastRowID db
                                  r2 <- mapM (insertPay bill) to_pay
@@ -341,28 +342,33 @@ handle_change_bill :: MonadIO m => SQLiteHandle -> Request -> m Response
 handle_change_bill db rq =
     let description = getInput rq "description"
         date = getInput rq "date"
-        ident :: Integer
+        ident :: Int64
         ident = read $ getInput rq "id"
         charges = parseJsonChargeRecords $ forceMaybe $ parseJSON $ getInput rq "charges"
         tot_amount = sum $ map cr_amount charges
         insertCharge charge =
             ("INSERT INTO charges (\"bill\", \"user\", \"amount\") values (:bill, :user, :amount);",
-             [(":bill", Int $ fromInteger ident),
+             [(":bill", Int ident),
               (":user", Text $ cr_user charge),
               (":amount", Double $ cr_amount charge)])
     in
       if tot_amount < -0.01 || tot_amount > 0.01
       then simpleError $ "expected total to be zero; was " ++ (show tot_amount)
       else
-          do res <- liftIO $ sqlTransaction db $
-                    execStatements_ db $
-                      [("UPDATE bills SET date = :date, description = :description WHERE billident = :ident;",
-                        [(":date", Text date),
-                         (":description", Text description),
-                         (":ident", Int $ fromInteger ident)]),
-                       ("DELETE FROM charges WHERE bill = :billident",
-                        [(":billident", Int $ fromInteger ident)])] ++
-                      map insertCharge charges
+          do my_uname <- whoAmI rq
+             res <- liftIO $ sqlTransaction db $
+                    do billOwner <- getBillOwner db ident
+                       if billOwner /= my_uname
+                        then error "You can't change other people's bills"
+                        else
+                            execStatements_ db $
+                                [("UPDATE bills SET date = :date, description = :description WHERE billident = :ident;",
+                                  [(":date", Text date),
+                                   (":description", Text description),
+                                   (":ident", Int ident)]),
+                                 ("DELETE FROM charges WHERE bill = :billident",
+                                  [(":billident", Int ident)])] ++
+                                map insertCharge charges
              case res of
                Nothing -> trivialSuccess
                Just msg -> simpleError msg
@@ -384,11 +390,30 @@ get_bill_date_description db ident =
              in return (date, description)
              
 
+whoAmI :: MonadIO m => Request -> m String
+whoAmI rq = cookieUname $ getInput rq "cookie"
+
+getBillOwner :: SQLiteHandle -> Int64 -> IO String
+getBillOwner db ident =
+    do r0 <- execParamStatement db
+             "SELECT owner FROM bills WHERE billident = :ident"
+             [(":ident", Int ident)]
+       case r0 of
+         Left msg -> error $ "Getting bill owner: " ++ msg
+         Right x ->
+             case forceLookup "owner" $ head $ concat x of
+               Text y -> return y
+
 handle_remove_bill :: (MonadIO m) => SQLiteHandle -> Request -> m Response
 handle_remove_bill db rq =
     let ident = read $ getInput rq "id"
-    in do res <- liftIO $ sqlTransaction db $
-                 do r1 <- execParamStatement_ db
+    in do my_uname <- whoAmI rq
+          res <- liftIO $ sqlTransaction db $
+                 do r0 <- getBillOwner db ident
+                    if r0 /= my_uname
+                     then error "You can't remove bills which are owned by other people"
+                     else return ()
+                    r1 <- execParamStatement_ db
                           "DELETE FROM charges WHERE bill = :ident"
                           [(":ident", Int ident)]
                     r2 <- execParamStatement_ db
@@ -403,7 +428,8 @@ handle_clone_bill :: (MonadIO m) => SQLiteHandle -> Request -> m Response
 handle_clone_bill db rq =
     let ident = read $ getInput rq "id"
     in
-      do (date, description) <- liftIO $ get_bill_date_description db ident
+      do my_uname <- cookieUname $ getInput rq "cookie"
+         (date, description) <- liftIO $ get_bill_date_description db ident
          charges' <- liftIO $ execParamStatement db "SELECT \"user\", \"amount\" FROM charges WHERE bill = :ident;"
                      [(":ident", Int $ fromInteger ident)]
          case charges' of
@@ -422,9 +448,10 @@ handle_clone_bill db rq =
                            (":amount", Double amount)]
                in do res <- liftIO $ sqlTransaction db $
                             do r1 <- execParamStatement_ db
-                                     "INSERT INTO bills (\"date\", \"description\") VALUES (:date, :description);"
+                                     "INSERT INTO bills (\"date\", \"description\", \"owner\") VALUES (:date, :description, :owner);"
                                      [(":date", Text date),
-                                      (":description", Text description)]
+                                      (":description", Text description),
+                                      (":owner", Text my_uname)]
                                case r1 of
                                  Just err -> return $ Just err
                                  Nothing ->
@@ -463,18 +490,6 @@ handle_add_user db rq =
                     [("result", JString "error"),
                      ("error", JString msg)]
 
-
-isUnameValid :: MonadIO m => SQLiteHandle -> String -> m Bool
-isUnameValid db uname =
-    do r <- liftIO $ execParamStatement db
-            "SELECT username FROM users WHERE username = :uname;"
-            [(":uname", Text uname)]
-       case r of
-         Left err -> return False
-         Right (x::[[Row Value]]) ->
-             case concat x of
-               [] -> return False
-               _ -> return True
 
 handle_change_passwd :: MonadIO m => SQLiteHandle -> Request -> m Response
 handle_change_passwd db rq =
@@ -531,15 +546,15 @@ make_login_token uname is_admin =
 
 isAdmin :: MonadIO m => String -> m Bool
 isAdmin cookie =
-    do tokens <- liftIO $ readIORef login_tokens
-       case lookup cookie tokens of
+    do tokns <- liftIO $ readIORef login_tokens
+       case lookup cookie tokns of
          Just (_, x) -> return x
          Nothing -> return False
 
 cookieUname :: MonadIO m => String -> m String
 cookieUname cookie =
-    do tokens <- liftIO $ readIORef login_tokens
-       case lookup cookie tokens of
+    do tokns <- liftIO $ readIORef login_tokens
+       case lookup cookie tokns of
          Just (x, _) -> return x
          Nothing -> error "bad cookie"
 
@@ -547,7 +562,7 @@ handle_login :: MonadIO m => SQLiteHandle -> Request -> m Response
 handle_login db rq =
     let uname = getInput rq "uname"
         password = getInput rq "password"
-    in do r <- liftIO $ execParamStatement db "SELECT is_admin FROM users WHERE lower(username) = lower(:uname) AND (password = :password OR (password ISNULL AND :password = \"\"));"
+    in do r <- liftIO $ execParamStatement db "SELECT username, is_admin FROM users WHERE lower(username) = lower(:uname) AND (password = :password OR (password ISNULL AND :password = \"\"));"
                [(":uname", Text uname),
                 (":password", Text password)]
           case r of
@@ -562,9 +577,13 @@ handle_login db rq =
                               _ -> False
                           is_admin_str = if is_admin then "1"
                                          else ""
+                          real_uname =
+                            case lookup "username" is_admin' of
+                              Just (Text y) -> y
+                              _ -> error "Huh?"
                       in
-                      do cookie <- liftIO $ make_login_token uname is_admin
-                         let newUrl = "/index.html?cookie=" ++ cookie ++ "&uname=" ++ uname ++ "&is_admin=" ++ is_admin_str
+                      do cookie <- liftIO $ make_login_token real_uname is_admin
+                         let newUrl = "/index.html?cookie=" ++ cookie ++ "&uname=" ++ real_uname ++ "&is_admin=" ++ is_admin_str
                          return $ addHeader "Location" newUrl $
                                 resultBS 303 $ stringToBSL
                                              "<html><head><title>Redirect</title></head><Body>Redirecting...</body></html>"
