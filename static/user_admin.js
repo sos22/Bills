@@ -30,7 +30,10 @@ function refresh_known_users(known_users) {
     newContents += "<tr>";
     newContents += "<td>" + known_users[k].uname + "</td>";
     newContents += "<td><a onclick=\"remove_user(&quot;" + known_users[k].uname + "&quot;)\">Remove</a></td>";
-    newContents += "<td id=\"remove_user_" + known_users[k].uname + "_error\"></td>"
+    newContents += "<td><input type=\"password\" name=\"password\" id=\"change_password_new_" + known_users[k].uname + "\" /><a onclick=\"change_password(&quot;" + known_users[k].uname + "&quot;)\">Change password</a></td>";
+    newContents += "<td><a onclick=\"grant_admin(&quot;" + known_users[k].uname + "&quot;)\">Grant admin access</a></td>";
+    newContents += "<td><a onclick=\"revoke_admin(&quot;" + known_users[k].uname + "&quot;)\">Revoke admin access</a></td>";
+    newContents += "<td id=\"change_user_" + known_users[k].uname + "_error\"></td>"
     newContents += "</tr>";
   }
   newContents += "</table>";
@@ -58,10 +61,14 @@ function add_user_submit() {
 	      });
 }
 
+function user_error(uname, msg) {
+    n = "#change_user_" + uname + "_error";
+    $(n).text(msg);
+}
+
 function remove_user(name) {
   function err(msg) {
-    n = "#remove_user_" + name + "_error";
-    $(n).text(msg);
+      user_error(name, msg);
   }
   err("Removing...");
   do_action("action/remove_user",
@@ -76,3 +83,16 @@ function remove_user(name) {
 	    });
 }
 
+function change_password(uname) {
+    new_pass = $("#change_password_new_" + uname).get(0).value;
+    do_action("action/change_password",
+	      {"username": uname,
+	       "password": new_pass },
+	      function(data) {
+		  if (data.result == "okay") {
+		      user_error(uname, "changed password");
+		  } else {
+		      user_error(uname, "Error: " + data.error);
+		  }
+		  });
+}

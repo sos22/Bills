@@ -12,4 +12,6 @@ sq() {
 #sq "create table bills(billident INTEGER primary key, date TEXT, description TEXT);"
 #sq "create table charges(bill REFERENCES bills (billident), chargeident INTEGER primary key autoincrement, user REFERENCES users(username), amount REAL);"
 
-sq "alter table users add column password;"
+#sq "alter table users add column password;"
+
+sq "alter table users add column is_admin;"

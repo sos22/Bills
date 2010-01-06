@@ -121,10 +121,14 @@ getInput rq key =
 handle_remove_user :: (MonadIO m) => SQLiteHandle -> Request -> m Response
 handle_remove_user db rq =
     let uname = getInput rq "username"
-    in do res <- liftIO $ execParamStatement_ db
-                 "delete from users where username=:user;"
-                 [(":user", Text uname)]
-          return $ resultBS 200 $ jsonResponse $
+    in do is_admin <- isAdmin $ getInput rq "cookie"
+          if not is_admin then simpleError "Need to be admin to remove users"
+           else
+           do
+            res <- liftIO $ execParamStatement_ db
+                   "delete from users where username=:user;"
+                   [(":user", Text uname)]
+            return $ resultBS 200 $ jsonResponse $
                  case res of
                    Just msg -> jsonError msg
                    Nothing -> JObj [("result", JString "okay")]
@@ -431,11 +435,16 @@ handle_add_user db rq =
                               then "_too_long_"
                               else bslToString (inputValue x)) inputs
         uname = map filterCharacterUname $ lookupDefault "username" saneInputs ""
+        cookie = getInput rq "cookie"
     in
-    do res <- liftIO $ execParamStatement_ db
-              "insert into users (\"username\") values (:user);"
-              [(":user", Text uname)]
-       return $ resultBS 200 $ jsonResponse $ JObj $ 
+    do is_admin <- isAdmin cookie
+       if not is_admin then simpleError "need to be admin to add users"
+        else
+        do
+          res <- liftIO $ execParamStatement_ db
+                 "insert into users (\"username\") values (:user);"
+                 [(":user", Text uname)]
+          return $ resultBS 200 $ jsonResponse $ JObj $ 
               case res of
                 Nothing -> [("result", JString "okay")]
                 Just "column username is not unique" ->
@@ -446,24 +455,67 @@ handle_add_user db rq =
                      ("error", JString msg)]
 
 
+isUnameValid :: MonadIO m => SQLiteHandle -> String -> m Bool
+isUnameValid db uname =
+    do r <- liftIO $ execParamStatement db
+            "SELECT username FROM users WHERE username = :uname;"
+            [(":uname", Text uname)]
+       case r of
+         Left err -> return False
+         Right (x::[[Row Value]]) ->
+             case concat x of
+               [] -> return False
+               _ -> return True
+
+handle_change_passwd :: MonadIO m => SQLiteHandle -> Request -> m Response
+handle_change_passwd db rq =
+    let uname = getInput rq "username"
+        passwd = getInput rq "password"
+    in do is_admin <- isAdmin $ getInput rq "cookie"
+          my_uname <- cookieUname $ getInput rq "cookie"
+          if not is_admin && my_uname /= uname
+           then simpleError "Need to be admin to change someone else's password"
+           else
+           do r <- liftIO $ execParamStatement_ db
+                        "UPDATE users SET \"password\" = :password WHERE lower(\"username\") = lower(:uname);"
+                        [(":uname", Text uname),
+                         (":password", Text passwd)]
+              case r of
+                Nothing -> trivialSuccess
+                Just e -> simpleError e
+
 {- Mapping from cookies to user names -}
-login_tokens :: IORef [(String, String)]
+login_tokens :: IORef [(String, (String, Bool))]
 {-# NOINLINE login_tokens #-}
 login_tokens =
     unsafePerformIO $ newIORef []
 
-make_login_token :: String -> IO String
-make_login_token uname =
+make_login_token :: String -> Bool -> IO String
+make_login_token uname is_admin =
     do (asInt::Integer) <- randomIO
        let res = show $ abs asInt
-       modifyIORef login_tokens $ (:) (uname,res)
+       modifyIORef login_tokens $ (:) (res,(uname,is_admin))
        return res
+
+isAdmin :: MonadIO m => String -> m Bool
+isAdmin cookie =
+    do tokens <- liftIO $ readIORef login_tokens
+       case lookup cookie tokens of
+         Just (_, x) -> return x
+         Nothing -> return False
+
+cookieUname :: MonadIO m => String -> m String
+cookieUname cookie =
+    do tokens <- liftIO $ readIORef login_tokens
+       case lookup cookie tokens of
+         Just (x, _) -> return x
+         Nothing -> error "bad cookie"
 
 handle_login :: MonadIO m => SQLiteHandle -> Request -> m Response
 handle_login db rq =
     let uname = getInput rq "uname"
         password = getInput rq "password"
-    in do r <- liftIO $ execParamStatement db "SELECT * FROM users WHERE lower(username) = lower(:uname) AND (password = :password OR (password ISNULL AND :password = \"\"));"
+    in do r <- liftIO $ execParamStatement db "SELECT is_admin FROM users WHERE lower(username) = lower(:uname) AND (password = :password OR (password ISNULL AND :password = \"\"));"
                [(":uname", Text uname),
                 (":password", Text password)]
           case r of
@@ -471,12 +523,20 @@ handle_login db rq =
             Right (x::[[Row Value]]) ->
                 case concat x of
                   [] -> simpleError "login failed"
-                  _ ->
-                      do cookie <- liftIO $ make_login_token uname
-                         let newUrl = "/index.html?cookie=" ++ cookie ++ "&uname=" ++ uname
+                  [is_admin'] ->
+                      let is_admin =
+                            case lookup "is_admin" is_admin' of
+                              Just (Text "1") -> True
+                              _ -> False
+                          is_admin_str = if is_admin then "1"
+                                         else ""
+                      in
+                      do cookie <- liftIO $ make_login_token uname is_admin
+                         let newUrl = "/index.html?cookie=" ++ cookie ++ "&uname=" ++ uname ++ "&is_admin=" ++ is_admin_str
                          return $ addHeader "Location" newUrl $
                                 resultBS 303 $ stringToBSL
                                              "<html><head><title>Redirect</title></head><Body>Redirecting...</body></html>"
+                  _ -> simpleError "database corrupt"
 
 main :: IO ()
 main =
@@ -490,6 +550,8 @@ main =
                                     [handle_get_user_list db],
                                 dir "remove_user"
                                     [withRequest $ handle_remove_user db],
+                                dir "change_password"
+                                    [withRequest $ handle_change_passwd db],
                                 dir "add_bill"
                                     [withRequest $ handle_add_bill db],
                                 dir "change_bill"

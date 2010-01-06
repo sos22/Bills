@@ -19,15 +19,36 @@ Simple billing application
 <!--
     uname = $.jqURL.get("uname");
     cookie = $.jqURL.get("cookie");
-    if (typeof(uname) == "undefined") {
-    document.location = "/login.html";
-    }
-    document.write("logged in as: ");
-    document.write(uname);
-    document.write("<br>");
+    is_admin = $.jqURL.get("is_admin");
+    if (typeof(uname) == "undefined")
+      document.location = "/login.html";
 -->
 </script>
 
+Logged in as: <div id="my_own_username"></div><br>
+<form>
+New password:
+<input type="password" alt="New password" id="my_new_password" />
+<input type="button" onclick="new_password_doit()" value="Change password" />
+</form>
+<script language="javascript">
+<!--
+    $("#my_own_username").text(uname);
+    function new_password_doit() {
+      new_pass = $("#my_new_password").get(0).value;
+      do_action("action/change_password",
+                {"username": uname,
+	         "password": new_pass },
+	        function(data) {
+		  if (data.result == "okay") {
+		      alert("changed");
+		  } else {
+		      alert("Error: " + data.error);
+		  }
+		  });
+    }
+-->
+</script>
 <ul>
   <li>
     <script language="javascript">
@@ -50,15 +71,15 @@ Simple billing application
 	-->
     </script>
   </li>
-  <li> 
-  </li>
-  <li> 
-    <script language="javascript">
-      <!--
-	  make_user_management();
-	-->
-    </script>
-  </li>
+  <script language="javascript">
+    <!--
+	  if (is_admin) {
+	    document.write("<li>");
+	    make_user_management();
+	    document.write("</li>");
+	  }
+      -->
+  </script>
 </ul>
 
 </p>
