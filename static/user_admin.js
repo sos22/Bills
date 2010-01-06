@@ -94,5 +94,31 @@ function change_password(uname) {
 		  } else {
 		      user_error(uname, "Error: " + data.error);
 		  }
-		  });
+	      });
+}
+
+function grant_admin(uname) {
+    do_action("action/set_admin",
+	      {"username": uname,
+	       "is_admin": "1" },
+	      function(data) {
+		  if (data.result == "okay") {
+		      user_error(uname, "gave admin privileges");
+		  } else {
+		      user_error(uname, "Error: " + data.error);
+		  }
+	      });
+}
+
+function revoke_admin(uname) {
+    do_action("action/set_admin",
+	      {"username": uname,
+	       "is_admin": "0" },
+	      function(data) {
+		  if (data.result == "okay") {
+		      user_error(uname, "revoked admin privileges");
+		  } else {
+		      user_error(uname, "Error: " + data.error);
+		  }
+	      });
 }

@@ -484,6 +484,29 @@ handle_change_passwd db rq =
                 Nothing -> trivialSuccess
                 Just e -> simpleError e
 
+handle_set_admin :: MonadIO m => SQLiteHandle -> Request -> m Response
+handle_set_admin db rq =
+    let uname = getInput rq "username"
+        want_admin =
+            case getInput rq "is_admin" of
+              "1" -> "1"
+              "0" -> ""
+              _ -> error "strange is_admin value"
+    in do is_admin <- isAdmin $ getInput rq "cookie"
+          my_uname <- cookieUname $ getInput rq "cookie"
+          if not is_admin
+           then simpleError "Need to be admin to change administrator flag"
+           else if map toLower my_uname == map toLower uname
+           then simpleError "Can't change your own admin flag"
+           else 
+            do r <- liftIO $ execParamStatement_ db
+                        "UPDATE users SET \"is_admin\" = :is_admin WHERE lower(\"username\") = lower(:uname);"
+                        [(":uname", Text uname),
+                         (":is_admin", Text want_admin)]
+               case r of
+                 Nothing -> trivialSuccess
+                 Just e -> simpleError e
+
 {- Mapping from cookies to user names -}
 login_tokens :: IORef [(String, (String, Bool))]
 {-# NOINLINE login_tokens #-}
@@ -552,6 +575,8 @@ main =
                                     [withRequest $ handle_remove_user db],
                                 dir "change_password"
                                     [withRequest $ handle_change_passwd db],
+                                dir "set_admin"
+                                    [withRequest $ handle_set_admin db],
                                 dir "add_bill"
                                     [withRequest $ handle_add_bill db],
                                 dir "change_bill"
