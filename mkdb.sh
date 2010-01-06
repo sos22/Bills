@@ -14,4 +14,6 @@ sq() {
 
 #sq "alter table users add column password;"
 
-sq "alter table users add column is_admin;"
+#sq "alter table users add column is_admin;"
+
+sq "alter table bills add column owner REFERENCES users (username);"

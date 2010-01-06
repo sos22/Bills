@@ -251,10 +251,13 @@ handle_add_bill db rq =
     in if abs (tot_pay - tot_recv) > 0.01
        then return $ resultBS 200 $ jsonResponse $ jsonError $ "Total payment " ++ (show tot_pay) ++ " doesn't match total receipt " ++ (show tot_recv)
        else
-           do res <- liftIO $ sqlTransaction db $
+           do my_uname <- cookieUname $ getInput rq "cookie"
+              res <- liftIO $ sqlTransaction db $
                      do r1 <- execParamStatement_ db
-                              "INSERT into bills (\"date\", \"description\") values (:date, :description);"
-                              [(":date", Text date), (":description", Text description)]
+                              "INSERT into bills (\"date\", \"description\", \"owner\") values (:date, :description, :owner);"
+                              [(":date", Text date),
+                               (":description", Text description),
+                               (":owner", Text my_uname)]
                         case r1 of
                           Just err -> return $ Just err
                           Nothing ->
@@ -270,12 +273,14 @@ handle_add_bill db rq =
 data BillEntry = BillEntry { be_ident :: Int,
                              be_date :: String,
                              be_description :: String,
+                             be_owner :: String,
                              be_charges :: [(Int, String, Double)] } deriving Show
 
 instance ToJSON BillEntry where
     toJSON be = JObj [("ident", JInt $ be_ident be),
                       ("date", JString $ be_date be),
                       ("description", JString $be_description be),
+                      ("owner", JString $ be_owner be),
                       ("charges", JList [JObj [("ident", JInt ident),
                                                ("charge", (JFloat $ realToFrac charge)),
                                                ("uname", (JString user))]
@@ -300,10 +305,14 @@ handle_old_bills db =
                                   (Text user) = forceLookup "user" charge
                                   (Double amount) = forceLookup "amount" charge
                           formatBill bill =
-                              (ident, date, description) where
+                              (ident, date, description, owner) where
                                   (Int ident) = forceLookup "billident" bill
                                   (Text date) = forceLookup "date" bill
                                   (Text description) = forceLookup "description" bill
+                                  owner' = forceLookup "owner" bill
+                                  owner = case owner' of
+                                            Text o -> o
+                                            Null -> ""
                           formattedCharges = map formatCharge $ concat charges
                           formattedBills = map formatBill $ concat bills
                       in do 
@@ -311,8 +320,8 @@ handle_old_bills db =
                                     [(ident, user, realToFrac amount) |
                                      (ident, bill', user, amount) <- formattedCharges, bill' == bill]
                                 result =
-                                    map (\(ident, date, description) ->
-                                             BillEntry (fromInteger $ toInteger ident) date description (chargesForBill ident)) formattedBills
+                                    map (\(ident, date, description, owner) ->
+                                             BillEntry (fromInteger $ toInteger ident) date description owner (chargesForBill ident)) formattedBills
                             simpleSuccess result
 
 

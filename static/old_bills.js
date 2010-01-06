@@ -5,7 +5,8 @@ function make_old_bills() {
 }
 
 function refresh_old_bills() {
-  var new_contents = "<table>";
+    var new_contents = "<table border=1 cellspacing=0>";
+    new_contents += "<h3><thead><tr><td>Date</td><td>Description</td><td>Created by</td><td>Charged user</td><td>Charge amount</td></tr></thead></h3>";
   for (var b in old_bills) {
     var bi = old_bills[b];
     new_contents += "<tbody id=\"old_bill_" + bi.ident + "\">";
@@ -18,6 +19,7 @@ function refresh_old_bills() {
     new_contents += "<tr>";
     new_contents += "<td id=\"" + ident("date") + "\" class=\"old_bill_date\">" + bi.date + "</td>";
     new_contents += "<td id=\"" + ident("description") + "\" class=\"old_bill_description\">" + bi.description + "</td>";
+    new_contents += "<td>&nbsp;" + bi.owner + "</td>";
     var c = bi.charges;
     if (c.length > 0)
 	new_contents += show_charge(c[0]);
@@ -28,7 +30,7 @@ function refresh_old_bills() {
     new_contents += "<td id=\"" + ident("clone") + "\" class=\"old_bill_clone\"><div onclick=\"clone_old_bill(" + bi.ident + ")\">Clone</div></td></tr>";
     for (index = 1; index < c.length; index++) {
        ch = c[index];
-       new_contents += "<tr><td colspan=2 />" + show_charge(ch) + "</tr>";
+       new_contents += "<tr><td colspan=3 />" + show_charge(ch) + "</tr>";
     }
     new_contents += "<tr><td colspan=4 id=\"" + ident("msg") + "\"></td></tr>";
     new_contents += "</tbody>";
