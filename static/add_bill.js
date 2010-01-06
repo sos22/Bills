@@ -157,21 +157,21 @@ function add_bill_submit() {
   to_receive = encode_json(to_receive);
 
   err("Adding bill");
-  jQuery.post("action/add_bill",
-              {"description": description,
-	       "date": date,
-	       "to_pay": to_pay,
-	       "to_receive": to_receive},
-	      function(data) {
+  do_action("action/add_bill",
+            {"description": description,
+	     "date": date,
+	     "to_pay": to_pay,
+	     "to_receive": to_receive},
+	    function(data) {
 	        if (data.result == "okay") {
-		  err("Added bill " + description);
-		  reset_add_bill();
-		  get_old_bills();
-		  get_known_users();
+		    err("Added bill " + description);
+		    reset_add_bill();
+		    get_old_bills();
+		    get_known_users();
 		} else {
-		  err("Adding bill " + description + ": " + data.error);
+		    err("Adding bill " + description + ": " + data.error);
 		}
-	      }, "json");
+	    });
 }
 
 function refresh_bill_split(known_users) {

@@ -156,42 +156,42 @@ function done_old_bill(ident) {
 	return;
     }
     err("Submitting new bill...");
-    jQuery.post("action/change_bill",
-		{"description": description,
-		 "id": parseInt(ident),
-		 "date": date,
-		 "charges": charges },
-		function(data) {
-		    if (data.result == "okay") {
-			err("Done.");
-			get_old_bills();
-			get_known_users();
-		    } else {
-			err("Saving bill: " + data.error);
-		    }
-		}, "json");
+    do_action("action/change_bill",
+	      {"description": description,
+	       "id": parseInt(ident),
+	       "date": date,
+	       "charges": charges },
+	      function(data) {
+		  if (data.result == "okay") {
+		      err("Done.");
+		      get_old_bills();
+		      get_known_users();
+		  } else {
+		      err("Saving bill: " + data.error);
+		  }
+	      });
 }
 
 function clone_old_bill(ident) {
-    jQuery.post("action/clone_bill",
-		{"id": parseInt(ident) },
-		function(data) {
-		    if (data.result == "okay") {
-			get_old_bills();
-			get_known_users();
-		    }
-		}, "json");
+    do_action("action/clone_bill",
+	      {"id": parseInt(ident) },
+	      function(data) {
+		  if (data.result == "okay") {
+		      get_old_bills();
+		      get_known_users();
+		  }
+	      });
 }
 
 function remove_old_bill(ident) {
-    jQuery.post("action/remove_bill",
-		{"id": parseInt(ident) },
-		function(data) {
-		    if (data.result == "okay") {
-			get_old_bills();
-			get_known_users();
-		    }
-		}, "json");
+    do_action("action/remove_bill",
+	      {"id": parseInt(ident) },
+	      function(data) {
+		  if (data.result == "okay") {
+		      get_old_bills();
+		      get_known_users();
+		  }
+	      });
 }
 
 new_charge_ident = 1;

@@ -32,3 +32,9 @@ function get_known_users() {
 }
 
 get_known_users();
+
+
+function do_action(action, params, continuation) {
+    params["cookie"] = cookie;
+    jQuery.post(action, params, continuation, "json");
+}

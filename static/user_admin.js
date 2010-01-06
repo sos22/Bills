@@ -47,16 +47,15 @@ function add_user_submit() {
 	return;
     }
     err("Creating a new user " + username);
-    jQuery.post("action/add_user", {"username": username},
-		function(data) {
-		    if (data.result == "okay") {
-			err("Created a new user " + username);
-			get_known_users();
-		    } else {
-			err("Creating a new user " + username + ": " + data.error);
-		    }
-		}, "json"
-	);
+    do_action("action/add_user", {"username": username},
+	      function(data) {
+		  if (data.result == "okay") {
+		      err("Created a new user " + username);
+		      get_known_users();
+		  } else {
+		      err("Creating a new user " + username + ": " + data.error);
+		  }
+	      });
 }
 
 function remove_user(name) {
@@ -65,15 +64,15 @@ function remove_user(name) {
     $(n).text(msg);
   }
   err("Removing...");
-  jQuery.post("action/remove_user",
-              {"username": name},
-	      function(data) {
+  do_action("action/remove_user",
+	    {"username": name},
+	    function(data) {
 	        if (data.result == "okay") {
-		   err("removed");
-		   get_known_users();
+		    err("removed");
+		    get_known_users();
 		} else {
-		   err("Error: " + data.error);
+		    err("Error: " + data.error);
 		}
-              }, "json");
+	    });
 }
 

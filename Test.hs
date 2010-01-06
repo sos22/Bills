@@ -9,6 +9,9 @@ import Control.Monad.Trans
 import Control.Exception
 import Char
 import Database.SQLite
+import Data.IORef
+import Random
+import System.IO.Unsafe
 import Text.ParserCombinators.Parsec.Combinator
 import Text.ParserCombinators.Parsec.Prim hiding (getInput)
 import Text.ParserCombinators.Parsec.Token
@@ -443,6 +446,38 @@ handle_add_user db rq =
                      ("error", JString msg)]
 
 
+{- Mapping from cookies to user names -}
+login_tokens :: IORef [(String, String)]
+{-# NOINLINE login_tokens #-}
+login_tokens =
+    unsafePerformIO $ newIORef []
+
+make_login_token :: String -> IO String
+make_login_token uname =
+    do (asInt::Integer) <- randomIO
+       let res = show $ abs asInt
+       modifyIORef login_tokens $ (:) (uname,res)
+       return res
+
+handle_login :: MonadIO m => SQLiteHandle -> Request -> m Response
+handle_login db rq =
+    let uname = getInput rq "uname"
+        password = getInput rq "password"
+    in do r <- liftIO $ execParamStatement db "SELECT * FROM users WHERE lower(username) = lower(:uname) AND (password = :password OR (password ISNULL AND :password = \"\"));"
+               [(":uname", Text uname),
+                (":password", Text password)]
+          case r of
+            Left msg -> simpleError msg
+            Right (x::[[Row Value]]) ->
+                case concat x of
+                  [] -> simpleError "login failed"
+                  _ ->
+                      do cookie <- liftIO $ make_login_token uname
+                         let newUrl = "/index.html?cookie=" ++ cookie ++ "&uname=" ++ uname
+                         return $ addHeader "Location" newUrl $
+                                resultBS 303 $ stringToBSL
+                                             "<html><head><title>Redirect</title></head><Body>Redirecting...</body></html>"
+
 main :: IO ()
 main =
     do db <- openConnection "local/bills.db"
@@ -464,12 +499,15 @@ main =
                                 dir "old_bills"
                                     [handle_old_bills db],
                                 dir "remove_bill"
-                                    [withRequest $ handle_remove_bill db]
+                                    [withRequest $ handle_remove_bill db],
+                                dir "login"
+                                    [withRequest $ handle_login db]
                                ]
                       , fileServe ["index.html", "jquery.js",
                                    "data.js", "jquery.bgiframe.js",
                                    "jquery.datePicker.js", "user_admin.js",
                                    "util.js", "old_bills.js", "add_bill.js",
-                                   "balances.js"]
+                                   "balances.js", "login.html" ]
+                                   
                                       "static"
                       ]

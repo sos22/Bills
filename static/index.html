@@ -8,12 +8,25 @@ Simple billing application
 <!--[if IE]><script type="text/javascript" src="jquery.bgiframe.js"></script><![endif]-->
 <script type="text/javascript" src="jquery.datePicker.js"></script>
 <link rel="stylesheet" type="text/css" media="screen" href="datePicker.css">
+<script type="text/javascript" src="jquery.jqURL.js"></script>
 <script type="text/javascript" src="util.js"></script>
 <script type="text/javascript" src="user_admin.js"></script>
 <script type="text/javascript" src="old_bills.js"></script>
 <script type="text/javascript" src="add_bill.js"></script>
 <script type="text/javascript" src="balances.js"></script>
 <body>
+<script language="javascript">
+<!--
+    uname = $.jqURL.get("uname");
+    cookie = $.jqURL.get("cookie");
+    if (typeof(uname) == "undefined") {
+    document.location = "/login.html";
+    }
+    document.write("logged in as: ");
+    document.write(uname);
+    document.write("<br>");
+-->
+</script>
 
 <ul>
   <li>
