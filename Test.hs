@@ -224,10 +224,48 @@ maybeErrListToMaybeErr errs =
       [] -> Nothing
       _ -> Just $ foldr (\a b -> a ++ ", " ++ b) "" errs'
 
+validate_date :: String -> String
+validate_date what =
+    let [year', month', day'] = split_on '-' what
+        split_on :: Eq a => a -> [a] -> [[a]]
+        split_on key string =
+            foldr (\char accumulated ->
+                       case accumulated of
+                         [] -> if char == key
+                               then [[]]
+                               else [[char]]
+                         (acc1:accs) ->
+                             if char == key
+                             then []:accumulated
+                             else (char:acc1):accs) [] string
+        year = read year'
+        month = read month'
+        day = read day'
+    in if or [length year' /= 4, length month' /= 2, length day' /= 2,
+              year < 2008, year > 2020, month < 1, month > 12,
+              day < 1, day > 30]
+       then error $ "Bad date " ++ what
+       else
+           {- 30 -> 9, 4, 6, 11
+              feb -> 2 -}
+           if day > (case month of
+                       x | x `elem` [1,3,5,7,8,9,10,12] -> 31
+                         | x `elem` [4,6,9,11] -> 30
+                         | x == 2 ->
+                             if year `mod` 400 == 0
+                             then 29
+                             else if year `mod` 100 == 0
+                                  then 28
+                                  else if year `mod` 4 == 0
+                                       then 29
+                                       else 28)
+           then error $ "Bad day of month " ++ what
+           else what
+
 handle_add_bill :: (MonadIO m) => SQLiteHandle -> Request -> m Response
 handle_add_bill db rq =
     let description = getInput rq "description"
-        date = getInput rq "date"
+        date = validate_date $ getInput rq "date"
         to_pay =
             parseJsonChargeRecords $ forceMaybe $ parseJSON $ getInput rq "to_pay"
         to_receive =
@@ -341,7 +379,7 @@ execStatements_ db xs =
 handle_change_bill :: MonadIO m => SQLiteHandle -> Request -> m Response
 handle_change_bill db rq =
     let description = getInput rq "description"
-        date = getInput rq "date"
+        date = validate_date $ getInput rq "date"
         ident :: Int64
         ident = read $ getInput rq "id"
         charges = parseJsonChargeRecords $ forceMaybe $ parseJSON $ getInput rq "charges"
