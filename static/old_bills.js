@@ -9,6 +9,7 @@ function refresh_old_bills() {
     new_contents += "<h3><thead><tr><td>Date</td><td>Description</td><td>Created by</td><td>Charged user</td><td>Charge amount</td></tr></thead></h3>";
   for (var b in old_bills) {
     var bi = old_bills[b];
+    owned_by_me = bi.owner.toLowerCase() == uname.toLowerCase();
     new_contents += "<tbody id=\"old_bill_" + bi.ident + "\">";
     function ident(c) {
       return "old_bill_" + bi.ident + "_" + c;
@@ -25,7 +26,7 @@ function refresh_old_bills() {
 	new_contents += show_charge(c[0]);
     else
 	new_contents += "<td/><td/>";
-    if (bi.owner.toLowerCase() == uname.toLowerCase()) {
+    if (owned_by_me) {
 	new_contents += "<td id=\"" + ident("edit") + "\" class=\"old_bill_edit\"><div onclick=\"edit_old_bill(" + bi.ident + ")\">Edit</div></td>";
 	new_contents += "<td id=\"" + ident("remove") + "\" class=\"old_bill_remove\"><div onclick=\"remove_old_bill(" + bi.ident + ")\">Remove</div></td>";
 	new_contents += "<td><iframe src=\"attach_file.html?cookie=" + cookie + "&bill=" + bi.ident + "\">No iframe support?</iframe></td>";
@@ -34,6 +35,14 @@ function refresh_old_bills() {
     for (index = 1; index < c.length; index++) {
        ch = c[index];
        new_contents += "<tr><td colspan=3 />" + show_charge(ch) + "</tr>";
+    }
+    for (index = 0; index < bi.attachments.length; index++) {
+	a = bi.attachments[index];
+	new_contents += "<tr><td colspan=3 /><td><a href=\"action/fetch_attachment?id=" + a.ident + "\">View attachment " + a.name + "</a></td>";
+	if (owned_by_me) {
+	    new_contents += "<td><div onclick=\"remove_attachment(" + a.ident + ")\">Remove attachment</div></td";
+	}
+	new_contents += "</tr>";
     }
     new_contents += "<tr><td colspan=4 id=\"" + ident("msg") + "\"></td></tr>";
     new_contents += "</tbody>";
@@ -227,4 +236,15 @@ function blur_oldbill_new_charge(ident) {
 
     new_charge_ident += 1;
     add_new_charge_to_bill(ident);
+}
+
+function remove_attachment(ident) {
+    do_action("action/remove_bill_attachment",
+	      {"id": parseInt(ident) },
+	      function(data) {
+		  if (data.result == "okay") {
+		      get_old_bills();
+		      get_known_users();
+		  }
+	      });
 }

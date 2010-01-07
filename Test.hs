@@ -321,7 +321,8 @@ data BillEntry = BillEntry { be_ident :: Int,
                              be_date :: String,
                              be_description :: String,
                              be_owner :: String,
-                             be_charges :: [(Int, String, Double)] } deriving Show
+                             be_charges :: [(Int, String, Double)],
+                             be_attachments :: [(Int, String)] } deriving Show
 
 instance ToJSON BillEntry where
     toJSON be = JObj [("ident", JInt $ be_ident be),
@@ -332,10 +333,48 @@ instance ToJSON BillEntry where
                                                ("charge", (JFloat $ realToFrac charge)),
                                                ("uname", (JString user))]
                                                |
-                                               (ident, user, charge) <- be_charges be])]
+                                               (ident, user, charge) <- be_charges be]),
+                      ("attachments", JList [JObj [("ident", JInt ident),
+                                                   ("name", JString name)]
+                                             | (ident, name) <- be_attachments be])]
 
 maximumUploadSize :: Int64
 maximumUploadSize = 500000
+
+handle_remove_bill_attachment :: MonadIO m => SQLiteHandle -> Request -> m Response
+handle_remove_bill_attachment db rq =
+    let attachIdent = read $ getInput rq "id"
+    in
+    do my_uname <- whoAmI rq
+       r <- liftIO $ execParamStatement db
+            "SELECT bills.owner FROM bills,bill_attachments WHERE bill_attachments.attach_ident = :ident AND bills.billident = bill_attachments.bill_ident;"
+            [(":ident", Int attachIdent)]
+       case r of
+         Left msg -> simpleError msg
+         Right x ->
+             let (Text owner_uname) = forceLookup "owner" $ head $ concat x
+             in if owner_uname /= my_uname
+                then simpleError "can't remove attachments you don't own"
+                else
+                    do r <- liftIO $ execParamStatement_ db
+                            "DELETE FROM bill_attachments WHERE attach_ident = :ident;"
+                            [(":ident", Int attachIdent)]
+                       case r of
+                         Nothing -> trivialSuccess
+                         Just msg -> simpleError msg
+               
+
+handle_fetch_attachment :: MonadIO m => SQLiteHandle -> Request -> m Response
+handle_fetch_attachment db rq =
+    let ident = read $ getInput rq "id"
+    in do r <- liftIO $ execParamStatement db
+               "SELECT content FROM bill_attachments WHERE attach_ident = :ident;"
+               [(":ident", Int ident)]
+          case r of
+            Left msg -> simpleError msg
+            Right x ->
+                let (Blob content) = forceLookup "content" $ head $ concat x
+                in return $ setHeader "content-type" "application/octet-stream" $ resultBS 200 $ BSL.fromChunks [content]
 
 handle_attach_file :: MonadIO m => SQLiteHandle -> Request -> m Response
 handle_attach_file db rq =
@@ -392,19 +431,35 @@ handle_old_bills db =
                                   (Int ident) = forceLookup "billident" bill
                                   (Text date) = forceLookup "date" bill
                                   (Text description) = forceLookup "description" bill
-                                  owner' = forceLookup "owner" bill
-                                  owner = case owner' of
-                                            Text o -> o
-                                            Null -> ""
+                                  owner =
+                                      case forceLookup "owner" bill of
+                                        Text o -> o
+                                        Null -> ""
+                          formatAttachment att =
+                               (fromInteger $ toInteger ident, fname) where
+                                   (Int ident) = forceLookup "attach_ident" att
+                                   (Text fname) = forceLookup "filename" att
                           formattedCharges = map formatCharge $ concat charges
                           formattedBills = map formatBill $ concat bills
-                      in do 
-                            let chargesForBill bill =
-                                    [(ident, user, realToFrac amount) |
-                                     (ident, bill', user, amount) <- formattedCharges, bill' == bill]
-                                result =
-                                    map (\(ident, date, description, owner) ->
-                                             BillEntry (fromInteger $ toInteger ident) date description owner (chargesForBill ident)) formattedBills
+                          attachmentsForBill bill =
+                              do r <- execParamStatement db "SELECT attach_ident, filename FROM bill_attachments WHERE bill_ident = :bill"
+                                      [(":bill", Int bill)]
+                                 case r of
+                                   Left msg -> error "Getting attachments for bill"
+                                   Right x ->
+                                       return $ map formatAttachment $ concat x
+                          chargesForBill bill =
+                               [(ident, user, realToFrac amount) |
+                                (ident, bill', user, amount) <- formattedCharges, bill' == bill]
+                          mkBillEntry (ident, date, description, owner) =
+                               do attaches <- liftIO $ attachmentsForBill ident
+                                  return $ BillEntry { be_ident = fromInteger $ toInteger ident,
+                                                       be_date = date,
+                                                       be_description = description,
+                                                       be_owner = owner,
+                                                       be_charges = chargesForBill ident,
+                                                       be_attachments = attaches }
+                      in do result <- mapM mkBillEntry formattedBills
                             simpleSuccess result
 
 
@@ -617,7 +672,7 @@ handle_set_admin db rq =
 login_tokens :: IORef [(String, (String, Bool))]
 {-# NOINLINE login_tokens #-}
 login_tokens =
-    unsafePerformIO $ newIORef [("0", ("Steven", True))]
+    unsafePerformIO $ newIORef []
 
 make_login_token :: String -> Bool -> IO String
 make_login_token uname is_admin =
@@ -698,7 +753,11 @@ main =
                                 dir "remove_bill"
                                     [withRequest $ handle_remove_bill db],
                                 dir "login"
-                                    [withRequest $ handle_login db]
+                                    [withRequest $ handle_login db],
+                                dir "remove_bill_attachment"
+                                    [withRequest $ handle_remove_bill_attachment db],
+                                dir "fetch_attachment"
+                                    [withRequest $ handle_fetch_attachment db]
                                ],
                        dir "forms"
                            [dir "attach_file"
