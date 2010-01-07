@@ -28,6 +28,7 @@ function refresh_old_bills() {
     if (bi.owner.toLowerCase() == uname.toLowerCase()) {
 	new_contents += "<td id=\"" + ident("edit") + "\" class=\"old_bill_edit\"><div onclick=\"edit_old_bill(" + bi.ident + ")\">Edit</div></td>";
 	new_contents += "<td id=\"" + ident("remove") + "\" class=\"old_bill_remove\"><div onclick=\"remove_old_bill(" + bi.ident + ")\">Remove</div></td>";
+	new_contents += "<td><iframe src=\"attach_file.html?cookie=" + cookie + "&bill=" + bi.ident + "\">No iframe support?</iframe></td>";
     }
     new_contents += "<td id=\"" + ident("clone") + "\" class=\"old_bill_clone\"><div onclick=\"clone_old_bill(" + bi.ident + ")\">Clone</div></td></tr>";
     for (index = 1; index < c.length; index++) {

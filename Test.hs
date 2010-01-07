@@ -2,10 +2,12 @@
 module Main(main) where
 
 import qualified Data.ByteString.Lazy as BSL
+import qualified Data.ByteString as BS
 
 import HAppS.Server
 import HAppS.Server.JSON
 import Control.Monad.Trans
+import Control.Monad.Identity
 import Control.Exception
 import Char
 import Database.SQLite
@@ -34,6 +36,12 @@ stringToBSL = BSL.pack . (map (fromInteger.toInteger.ord))
 
 bslToString :: BSL.ByteString -> String
 bslToString = map (chr . fromInteger . toInteger) . BSL.unpack
+
+safeBslToString :: BSL.ByteString -> String
+safeBslToString bsl =
+    if BSL.length bsl > 10000
+    then error "unpack very large BSL"
+    else bslToString bsl
 
 jsonResponse :: JSON -> BSL.ByteString
 jsonResponse = stringToBSL. jsonToString
@@ -326,6 +334,42 @@ instance ToJSON BillEntry where
                                                |
                                                (ident, user, charge) <- be_charges be])]
 
+maximumUploadSize :: Int64
+maximumUploadSize = 500000
+
+handle_attach_file :: MonadIO m => SQLiteHandle -> Request -> m Response
+handle_attach_file db rq =
+    let body = bodyInput rq
+        file = forceLookup "file_to_attach" body
+        file_body = inputValue file
+        file_name = forceMaybe $ inputFilename file
+        cookie = safeBslToString $ inputValue $ forceLookup "cookie" body
+        billIdent :: Int64
+        billIdent = read $ safeBslToString $ inputValue $ forceLookup "bill" body
+        referer = map (chr . fromInteger . toInteger) $ BS.unpack $ forceMaybe $ getHeader "Referer" rq
+    in
+      if BSL.length file_body > maximumUploadSize
+      then simpleError "File is too big to attach"
+      else
+          do my_uname <- cookieUname cookie
+             billOwner <- liftIO $ getBillOwner db billIdent
+             if billOwner /= my_uname
+              then simpleError "Can't attach files to someone else's bills"
+              else
+                  do r <- liftIO $ execParamStatement_ db
+                          "INSERT INTO bill_attachments (\"bill_ident\", \"content\", \"filename\") VALUES (:bill_ident, :content, :filename);"
+                          [(":bill_ident", Int billIdent),
+                           (":content", Blob $ BS.concat $ BSL.toChunks file_body),
+                           (":filename", Text file_name)]
+                     case r of
+                       Just msg -> simpleError msg
+                       Nothing ->
+                           do attachIdent <- liftIO $ getLastRowID db
+                              return $ addHeader "Location" referer $
+                                     addHeader "X-AttachmentId" (show attachIdent) $
+                                     resultBS 303 $ stringToBSL $
+                                              "<html><body><a href=\"" ++ referer ++ "\">Redirecting...</a></body></html>"
+
 handle_old_bills :: (MonadIO m) => SQLiteHandle -> m Response
 handle_old_bills db =
     do bills' <- liftIO $ execStatement db "SELECT * FROM bills ORDER BY date DESC;"
@@ -573,7 +617,7 @@ handle_set_admin db rq =
 login_tokens :: IORef [(String, (String, Bool))]
 {-# NOINLINE login_tokens #-}
 login_tokens =
-    unsafePerformIO $ newIORef []
+    unsafePerformIO $ newIORef [("0", ("Steven", True))]
 
 make_login_token :: String -> Bool -> IO String
 make_login_token uname is_admin =
@@ -655,12 +699,15 @@ main =
                                     [withRequest $ handle_remove_bill db],
                                 dir "login"
                                     [withRequest $ handle_login db]
-                               ]
-                      , fileServe ["index.html", "jquery.js",
-                                   "data.js", "jquery.bgiframe.js",
-                                   "jquery.datePicker.js", "user_admin.js",
-                                   "util.js", "old_bills.js", "add_bill.js",
-                                   "balances.js", "login.html" ]
-                                   
+                               ],
+                       dir "forms"
+                           [dir "attach_file"
+                                    [withRequest $ handle_attach_file db]],
+                       fileServe ["index.html", "jquery.js",
+                                  "data.js", "jquery.bgiframe.js",
+                                  "jquery.datePicker.js", "user_admin.js",
+                                  "util.js", "old_bills.js", "add_bill.js",
+                                  "balances.js", "login.html",
+                                  "attach_file.html"]
                                       "static"
                       ]

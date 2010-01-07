@@ -16,4 +16,6 @@ sq() {
 
 #sq "alter table users add column is_admin;"
 
-sq "alter table bills add column owner REFERENCES users (username) NOT NULL;"
+#sq "alter table bills add column owner REFERENCES users (username) NOT NULL;"
+
+sq "create table bill_attachments(attach_ident INTEGER PRIMARY KEY AUTOINCREMENT, bill_ident REFERENCES bills(billident), content BLOB, filename);"
