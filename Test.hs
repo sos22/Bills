@@ -107,6 +107,14 @@ findBalance db uname =
                   [(":user", Text uname)]
        return $ rightMap ((rowDouble "SUM(amount)") . concat) charges
 
+deEither :: [Either a b] -> Either a [b]
+deEither [] = Right []
+deEither ((Left msg):_) = Left msg
+deEither ((Right x):xs) =
+    case deEither xs of
+      Left msg -> Left msg
+      Right xs' -> Right (x:xs')
+
 handle_get_user_list :: (MonadIO m) => SQLiteHandle -> m Response
 handle_get_user_list db =
     let doOneEntry :: Row Value -> IO (Either String JSON)
@@ -116,13 +124,6 @@ handle_get_user_list db =
                     JObj [("uname", JString uname),
                           ("balance", JFloat $ realToFrac balance)]
             in liftM (rightMap build_return) $ findBalance db uname
-
-        deEither [] = Right []
-        deEither ((Left msg):_) = Left msg
-        deEither ((Right x):xs) =
-            case deEither xs of
-              Left msg -> Left msg
-              Right xs' -> Right (x:xs')
     in
     do res <- liftIO $ dbStatement db "SELECT \"username\" FROM users;"
        either simpleError
@@ -377,15 +378,13 @@ handle_remove_bill_attachment db rq =
                             [(":ident", Int attachIdent)] >>=
                             maybeToResponse
                
-attachmentsForBill :: Int64 -> SQLiteHandle -> IO [(Int, String)]
+attachmentsForBill :: Int64 -> SQLiteHandle -> IO (Either String [(Int, String)])
 attachmentsForBill bill db =
     let formatAttachment att =
             (fromInteger $ toInteger ident, fname) where
                 (Int ident) = forceLookup "attach_ident" att
                 (Text fname) = forceLookup "filename" att
-        doFormat =
-            either (error . ((++) "Getting attachments for bill: "))
-                   (map formatAttachment)
+        doFormat = rightMap $ map formatAttachment
     in
     liftM doFormat $
           dbParamStatement db "SELECT attach_ident, filename FROM bill_attachments WHERE bill_ident = :bill"
@@ -396,10 +395,11 @@ handle_fetch_statement db rq =
     let username = getInput rq "username"
         start_date = getInput rq "start-date"
         end_date = getInput rq "end-date"
-        add_attachments :: (Int64, String, String, Double, Double) -> IO (String, String, Double, Double, [(Int, String)])
+        add_attachments :: (Int64, String, String, Double, Double) -> IO (Either String (String, String, Double, Double, [(Int, String)]))
         add_attachments (bill, date, descr, amt, pb) =
-            do attaches <- attachmentsForBill bill db
-               return (date, descr, amt, pb, attaches)
+            liftM (rightMap $ \attaches' ->
+                       (date, descr, amt, pb, attaches')) $
+                      attachmentsForBill bill db
         start_balance =
             do r <- execParamStatement db
                     ("SELECT SUM(charges.amount) FROM bills, charges " ++
@@ -437,10 +437,11 @@ handle_fetch_statement db rq =
                             (Double amt) = forceLookup "amount" row
                         in (ident, date, description, amt)
                     parsed_rows = map parse_row $ concat rows
-                    with_post_balances :: [(Int64, String, String, Double)] -> Double -> [(Int64, String, String, Double, Double)]
-                    with_post_balances [] _ = []
-                    with_post_balances ((a, b, c, amt):others) start =
-                        (a,b,c,amt,start+amt):(with_post_balances others (start + amt))
+                    add_post_balances :: [(Int64, String, String, Double)] -> Double -> [(Int64, String, String, Double, Double)]
+                    add_post_balances [] _ = []
+                    add_post_balances ((a, b, c, amt):others) start =
+                        (a,b,c,amt,start+amt):(add_post_balances others (start + amt))
+                    with_post_balances = add_post_balances parsed_rows starting_balance
                     format_row (date, descr, amt, post_balance, attaches) =
                         JObj [("date", JString date),
                               ("description", JString descr),
@@ -450,9 +451,11 @@ handle_fetch_statement db rq =
                                JList [JObj [("attach_id", JInt aid),
                                             ("filename", JString fname)]
                                       | (aid, fname) <- attaches])]
-                in do augmented_rows <- liftIO $ mapM add_attachments $ with_post_balances parsed_rows starting_balance
-                      simpleSuccess $ JObj [("starting_balance", JFloat $ realToFrac starting_balance),
-                                            ("charges", JList $ map format_row augmented_rows)]
+                in liftIO $ mapM add_attachments with_post_balances >>=
+                            (eitherToResponse .
+                             (rightMap $ \charges -> JObj [("starting_balance", JFloat $ realToFrac starting_balance),
+                                                           ("charges", JList $ map format_row charges)]) .
+                             deEither)
 
 handle_fetch_attachment :: MonadIO m => SQLiteHandle -> Request -> m Response
 handle_fetch_attachment db rq =
@@ -532,16 +535,16 @@ handle_old_bills db =
                                [(ident, user, realToFrac amount) |
                                 (ident, bill', user, amount) <- formattedCharges, bill' == bill]
                           mkBillEntry (ident, date, description, owner) =
-                               do attaches <- liftIO $ attachmentsForBill ident db
-                                  return $ BillEntry { be_ident = fromInteger $ toInteger ident,
-                                                       be_date = date,
-                                                       be_description = description,
-                                                       be_owner = owner,
-                                                       be_charges = chargesForBill ident,
-                                                       be_attachments = attaches }
-                      in (mapM mkBillEntry formattedBills) >>= 
-                         simpleSuccess
-
+                               let mk_be attachments =
+                                       BillEntry { be_ident = fromInteger $ toInteger ident,
+                                                   be_date = date,
+                                                   be_description = description,
+                                                   be_owner = owner,
+                                                   be_charges = chargesForBill ident,
+                                                   be_attachments = attachments }
+                               in liftM (rightMap mk_be) $ attachmentsForBill ident db
+                      in liftIO $ (liftM deEither $ mapM mkBillEntry formattedBills) >>= 
+                                  eitherToResponse
 
 composeNothings :: Monad m => m (Maybe x) -> m (Maybe x) -> m (Maybe x)
 composeNothings l r =
