@@ -74,20 +74,29 @@ trivialSuccess :: Monad m => m Response
 trivialSuccess = return $ resultBS 200 $ jsonResponse $
                  JObj [("result", JString "okay")]
 
+dbParamStatement :: SQLiteHandle -> String -> [(String, Value)]-> IO (Either String [Row Value])
+dbParamStatement db query params =
+    do res <- execParamStatement db query params
+       case res of
+         Left m -> return $ Left m
+         Right x -> return $ Right $ concat x
+
+rowDouble :: String -> Row Value -> Double
+rowDouble key row =
+    case forceLookup key row of
+      Double x -> x
+      _ -> error $ "Type error getting double " ++ key
+
+rightMap :: (a -> b) -> Either c a -> Either c b
+rightMap f (Right x) = Right $ f x
+rightMap _ (Left x) = Left x
+
 findBalance :: SQLiteHandle -> String -> IO (Either String Double)
 findBalance db uname =
-    do charges <- execParamStatement db
-                  "SELECT amount FROM charges WHERE user = :user"
+    do charges <- dbParamStatement db
+                  "SELECT SUM(amount) FROM charges WHERE user = :user"
                   [(":user", Text uname)]
-       case charges of
-         Left msg -> return (Left msg)
-         Right r ->
-             let unwrp :: Row Value -> Double
-                 unwrp xs =
-                     let (Double r2) = snd $ head xs
-                     in r2
-             in
-               return $ Right $ sum $ map (unwrp) $ concat r
+       return $ rightMap ((rowDouble "SUM(amount)") . concat) charges
 
 handle_get_user_list :: (MonadIO m) => SQLiteHandle -> m Response
 handle_get_user_list db =
