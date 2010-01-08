@@ -363,6 +363,80 @@ handle_remove_bill_attachment db rq =
                          Nothing -> trivialSuccess
                          Just msg -> simpleError msg
                
+attachmentsForBill :: Int64 -> SQLiteHandle -> IO [(Int, String)]
+attachmentsForBill bill db =
+    let formatAttachment att =
+            (fromInteger $ toInteger ident, fname) where
+                (Int ident) = forceLookup "attach_ident" att
+                (Text fname) = forceLookup "filename" att
+    in
+    do r <- execParamStatement db "SELECT attach_ident, filename FROM bill_attachments WHERE bill_ident = :bill"
+            [(":bill", Int bill)]
+       case r of
+         Left msg -> error "Getting attachments for bill"
+         Right x -> return $ map formatAttachment $ concat x
+
+handle_fetch_statement :: MonadIO m => SQLiteHandle -> Request -> m Response
+handle_fetch_statement db rq =
+    let username = getInput rq "username"
+        start_date = getInput rq "start-date"
+        end_date = getInput rq "end-date"
+        add_attachments :: (Int64, String, String, Double, Double) -> IO (String, String, Double, Double, [(Int, String)])
+        add_attachments (bill, date, descr, amt, pb) =
+            do attaches <- attachmentsForBill bill db
+               return (date, descr, amt, pb, attaches)
+        start_balance =
+            do r <- execParamStatement db
+                    ("SELECT SUM(charges.amount) FROM bills, charges " ++
+                     "WHERE bills.date < :start_date " ++
+                     "AND bills.billident == charges.bill " ++
+                     "AND charges.user == :uname")
+                    [(":start_date", Text start_date),
+                     (":uname", Text username)]
+               case r of
+                 Left msg -> error msg
+                 Right (x::[[Row Value]]) ->
+                     case forceLookup "SUM(charges.amount)" $ head $ concat x of
+                       Null -> return 0
+                       Double x -> return x
+    in do r <- liftIO $ execParamStatement db 
+               ("SELECT bills.billident, bills.date, bills.description, charges.amount FROM bills, charges " ++
+                "WHERE bills.date >= :start_date " ++
+                "AND bills.date <= :end_date " ++
+                "AND bills.billident == charges.bill " ++
+                "AND charges.user == :uname " ++
+                "ORDER BY bills.date")
+               [(":start_date", Text start_date),
+                (":end_date", Text end_date),
+                (":uname", Text username)]
+          starting_balance <- liftIO $ start_balance
+          case r of
+            Left msg -> simpleError msg
+            Right rows ->
+                let parse_row :: Row Value -> (Int64, String, String, Double)
+                    parse_row row =
+                        let (Int ident) = forceLookup "billident" row
+                            (Text date) = forceLookup "date" row
+                            (Text description) = forceLookup "description" row
+                            (Double amt) = forceLookup "amount" row
+                        in (ident, date, description, amt)
+                    parsed_rows = map parse_row $ concat rows
+                    with_post_balances :: [(Int64, String, String, Double)] -> Double -> [(Int64, String, String, Double, Double)]
+                    with_post_balances [] _ = []
+                    with_post_balances ((a, b, c, amt):others) start =
+                        (a,b,c,amt,start+amt):(with_post_balances others (start + amt))
+                    format_row (date, descr, amt, post_balance, attaches) =
+                        JObj [("date", JString date),
+                              ("description", JString descr),
+                              ("amount", JFloat $ realToFrac amt),
+                              ("balance_after", JFloat $ realToFrac post_balance),
+                              ("attachments",
+                               JList [JObj [("attach_id", JInt aid),
+                                            ("filename", JString fname)]
+                                      | (aid, fname) <- attaches])]
+                in do augmented_rows <- liftIO $ mapM add_attachments $ with_post_balances parsed_rows starting_balance
+                      simpleSuccess $ JObj [("starting_balance", JFloat $ realToFrac starting_balance),
+                                            ("charges", JList $ map format_row augmented_rows)]
 
 handle_fetch_attachment :: MonadIO m => SQLiteHandle -> Request -> m Response
 handle_fetch_attachment db rq =
@@ -435,24 +509,13 @@ handle_old_bills db =
                                       case forceLookup "owner" bill of
                                         Text o -> o
                                         Null -> ""
-                          formatAttachment att =
-                               (fromInteger $ toInteger ident, fname) where
-                                   (Int ident) = forceLookup "attach_ident" att
-                                   (Text fname) = forceLookup "filename" att
                           formattedCharges = map formatCharge $ concat charges
                           formattedBills = map formatBill $ concat bills
-                          attachmentsForBill bill =
-                              do r <- execParamStatement db "SELECT attach_ident, filename FROM bill_attachments WHERE bill_ident = :bill"
-                                      [(":bill", Int bill)]
-                                 case r of
-                                   Left msg -> error "Getting attachments for bill"
-                                   Right x ->
-                                       return $ map formatAttachment $ concat x
                           chargesForBill bill =
                                [(ident, user, realToFrac amount) |
                                 (ident, bill', user, amount) <- formattedCharges, bill' == bill]
                           mkBillEntry (ident, date, description, owner) =
-                               do attaches <- liftIO $ attachmentsForBill ident
+                               do attaches <- liftIO $ attachmentsForBill ident db
                                   return $ BillEntry { be_ident = fromInteger $ toInteger ident,
                                                        be_date = date,
                                                        be_description = description,
@@ -757,7 +820,9 @@ main =
                                 dir "remove_bill_attachment"
                                     [withRequest $ handle_remove_bill_attachment db],
                                 dir "fetch_attachment"
-                                    [withRequest $ handle_fetch_attachment db]
+                                    [withRequest $ handle_fetch_attachment db],
+                                dir "fetch_statement"
+                                    [withRequest $ handle_fetch_statement db]
                                ],
                        dir "forms"
                            [dir "attach_file"
@@ -767,6 +832,7 @@ main =
                                   "jquery.datePicker.js", "user_admin.js",
                                   "util.js", "old_bills.js", "add_bill.js",
                                   "balances.js", "login.html",
-                                  "attach_file.html"]
+                                  "attach_file.html", "statements.html",
+                                  "display_statement.html" ]
                                       "static"
                       ]

@@ -1,0 +1,96 @@
+<html>
+<head>
+<title>Statements</title>
+<script type="text/javascript" src="jquery-1.3.2.js"></script>
+<script type="text/javascript" src="date.js"></script>
+<script type="text/javascript" src="jquery.datePicker.js"></script>
+<link rel="stylesheet" type="text/css" media="screen" href="datePicker.css">
+<script type="text/javascript" src="jquery.jqURL.js"></script>
+<script type="text/javascript" src="util.js"></script>
+</head>
+<body>
+<script language="javascript">
+<!--
+uname = $.jqURL.get("uname");
+show_user = $.jqURL.get("show_user");
+cookie = $.jqURL.get("cookie");
+is_admin = $.jqURL.get("is_admin");
+if (typeof(uname) == "undefined")
+    document.location = "/login.html";
+/* Left pad a string to a given length */
+function pad_string(to_pad, pad_with, target_width) {
+    if (to_pad.length >= target_width)
+	return to_pad;
+    else
+	return pad_with * (target_width - to_pad.length) + to_pad;
+}
+function fmt_date(d) {
+    return today.getFullYear() + "-" +
+	pad_string( (today.getMonth() + 1).toString(), "0", 2) + "-" +
+	pad_string( today.getDate().toString(), "0", 2) ;
+}
+
+function round_amount(amt) {
+    return (new Number(amt)).toFixed(2);
+}
+function display_statement(data) {
+    var the_frame = $("#display_frame").get(0);
+    var render_area = the_frame.contentDocument.body;
+
+    var content = "<table>";
+    content += "<thead><tr><td>Date</td><td>Description</td><td align=right>Amount</td><td align=right>Balance</td></tr></thead>";
+    content += "<tr><td colspan=3></td><td align=right>" + round_amount(data.starting_balance) + "</td></tr>";
+    var entries = data.charges;
+    for (e_index in entries) {
+	e = entries[e_index];
+	content += "<tr>";
+	content += "<td>" + e.date + "</td>";
+	content += "<td>" + e.description + "</td>";
+	content += "<td align=right>" + round_amount(e.amount) + "</td>";
+	content += "<td align=right>" + round_amount(e.balance_after) + "</td>";
+	content += "</tr>";
+	for (a_index in e.attachments) {
+	    a = e.attachments[a_index];
+	    content += "<tr><td colspan=3><a href=\"action/fetch_attachment?id=" + a.attach_id + "\">View attachment " + a.filename + "</a></td></tr>";
+	}
+    }
+    content += "</table>";
+    render_area.innerHTML = content;
+}
+
+function refresh_display() {
+    var start_date = $("#start_date").get(0).value;
+    var end_date = $("#end_date").get(0).value;
+    do_action("action/fetch_statement",
+	      { "username": show_user,
+		"start-date": start_date,
+		"end-date": end_date },
+	      function(data) {
+		  if (data.result == "okay") {
+		      display_statement(data.data);
+		  } else {
+		      alert("Error " + data.error + " getting bill data");
+		  }
+	      });
+}
+
+-->
+</script>
+<form>
+Start date: <input class="date-picker" id="start_date"><br>
+End date: <input id="end_date" class="date-pick"><br>
+<input type="button" onclick="refresh_display()" value="Fetch">
+</form>
+<iframe src="display_statement.html" id="display_frame" width="100%" height="80%">
+</iframe>
+<script language="javascript">
+<!--
+$(function()
+{
+    $('#start_date').datePicker({startDate:'1996-01-01'});
+    $('#end_date').datePicker({startDate:'1996-01-01'});
+});
+-->
+</script>
+</body>
+</html>
