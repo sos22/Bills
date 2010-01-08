@@ -41,9 +41,9 @@ function refresh_old_bills() {
     }
     for (index = 0; index < bi.attachments.length; index++) {
 	a = bi.attachments[index];
-	new_contents += "<tr><td colspan=3 /><td><a href=\"action/fetch_attachment?id=" + a.ident + "\">View attachment " + a.name + "</a></td>";
+	new_contents += "<tr><td colspan=3 /><td colspan=2><a href=\"action/fetch_attachment?id=" + a.ident + "\">View attachment " + a.name + "</a></td>";
 	if (owned_by_me) {
-	    new_contents += "<td><div onclick=\"remove_attachment(" + a.ident + ")\">Remove attachment</div></td";
+	    new_contents += "<td colspan=4><div onclick=\"remove_attachment(" + a.ident + ")\">Remove attachment</div></td";
 	}
 	new_contents += "</tr>";
     }
