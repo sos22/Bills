@@ -74,18 +74,27 @@ trivialSuccess :: Monad m => m Response
 trivialSuccess = return $ resultBS 200 $ jsonResponse $
                  JObj [("result", JString "okay")]
 
-dbParamStatement :: SQLiteHandle -> String -> [(String, Value)]-> IO (Either String [Row Value])
+dbParamStatement :: SQLiteHandle -> String -> [(String, Value)] -> IO (Either String [Row Value])
 dbParamStatement db query params =
     do res <- execParamStatement db query params
-       case res of
-         Left m -> return $ Left m
-         Right x -> return $ Right $ concat x
+       return $ rightMap concat res
+
+dbStatement :: SQLiteHandle -> String -> IO (Either String [Row Value])
+dbStatement db query =
+    do res <- execStatement db query
+       return $ rightMap concat res
 
 rowDouble :: String -> Row Value -> Double
 rowDouble key row =
     case forceLookup key row of
       Double x -> x
       _ -> error $ "Type error getting double " ++ key
+
+rowString :: String -> Row Value -> String
+rowString key row =
+    case forceLookup key row of
+      Text x -> x
+      _ -> error $ "Type error getting string " ++ key
 
 rightMap :: (a -> b) -> Either c a -> Either c b
 rightMap f (Right x) = Right $ f x
@@ -100,33 +109,26 @@ findBalance db uname =
 
 handle_get_user_list :: (MonadIO m) => SQLiteHandle -> m Response
 handle_get_user_list db =
-    let doOneEntry :: Row String -> IO (Either String JSON)
+    let doOneEntry :: Row Value -> IO (Either String JSON)
         doOneEntry r =
-            let uname = forceLookup "username" r
-            in
-              do balance <- findBalance db uname
-                 case balance of
-                   Left msg -> return (Left msg)
-                   Right bal ->
-                       return $ Right $ JObj [("uname", JString $ forceLookup "username" r),
-                                              ("balance", JFloat $ realToFrac bal)]
+            let uname = rowString "username" r
+                build_return balance =
+                    JObj [("uname", JString uname),
+                          ("balance", JFloat $ realToFrac balance)]
+            in liftM (rightMap build_return) $ findBalance db uname
+
+        deEither [] = Right []
+        deEither ((Left msg):_) = Left msg
+        deEither ((Right x):xs) =
+            case deEither xs of
+              Left msg -> Left msg
+              Right xs' -> Right (x:xs')
     in
-    do res <- liftIO $ execStatement db
-              "select \"username\" from users;"
-       case res of
-         Left msg ->
-             simpleError msg
-         Right r ->
-             do resData <- liftIO $ mapM doOneEntry $ concat r
-                let deEither [] = Right []
-                    deEither ((Left msg):_) = Left msg
-                    deEither ((Right x):xs) =
-                        case deEither xs of
-                          Left msg -> Left msg
-                          Right xs' -> Right (x:xs')
-                case deEither resData of
-                    Left msg -> simpleError msg
-                    Right r2 -> simpleSuccess $ JList r2
+    do res <- liftIO $ dbStatement db "SELECT \"username\" FROM users;"
+       either simpleError
+         (\r ->
+             liftIO $ (liftM deEither $ mapM doOneEntry r) >>=
+                      eitherToResponse) res
 
 getInput :: Request -> String -> String
 getInput rq key =
@@ -134,20 +136,27 @@ getInput rq key =
     in if BSL.length res > 10000 then "_too_long_"
        else bslToString res
 
+cond :: a -> a -> Bool -> a
+cond t _ True = t
+cond _ f False = f
+
+requireAdmin :: MonadIO m => Request -> m Response -> m Response
+requireAdmin rq doit =
+    (isAdmin $ getInput rq "cookie") >>=
+    (cond doit (simpleError "Need to be administrator to do that"))
+
+maybeToResponse :: MonadIO m => Maybe String -> m Response
+maybeToResponse = maybe trivialSuccess simpleError
+
+eitherToResponse :: (Monad m, ToJSON b) => Either String b -> m Response
+eitherToResponse = either simpleError simpleSuccess
+
 handle_remove_user :: (MonadIO m) => SQLiteHandle -> Request -> m Response
 handle_remove_user db rq =
-    let uname = getInput rq "username"
-    in do is_admin <- isAdmin $ getInput rq "cookie"
-          if not is_admin then simpleError "Need to be admin to remove users"
-           else
-           do
-            res <- liftIO $ execParamStatement_ db
-                   "delete from users where username=:user;"
-                   [(":user", Text uname)]
-            return $ resultBS 200 $ jsonResponse $
-                 case res of
-                   Just msg -> jsonError msg
-                   Nothing -> JObj [("result", JString "okay")]
+    requireAdmin rq $ (liftIO $ execParamStatement_ db
+                       "delete from users where username=:user;"
+                       [(":user", Text $ getInput rq "username")]) >>=
+                      maybeToResponse
 
 jsonParser :: GenParser Char () JSON
 jsonParser =
@@ -294,20 +303,20 @@ handle_add_bill db rq =
         insertPay :: Integer -> ChargeRecord -> IO (Maybe String)
         insertPay bill cr =
             execParamStatement_ db
-                 "INSERT into charges (\"bill\", \"user\", \"amount\") values (:bill, :user, :amount);"
+                 "INSERT INTO charges (\"bill\", \"user\", \"amount\") VALUES (:bill, :user, :amount);"
                  [(":bill", Int $ fromInteger bill),
                   (":user", Text $ cr_user cr),
                   (":amount", Double $ cr_amount cr)]
         insertReceive :: Integer -> ChargeRecord -> IO (Maybe String)
         insertReceive bill cr =
             execParamStatement_ db
-                 "INSERT into charges (\"bill\", \"user\", \"amount\") values (:bill, :user, :amount);"
+                 "INSERT INTO charges (\"bill\", \"user\", \"amount\") VALUES (:bill, :user, :amount);"
                  [(":bill", Int $ fromInteger bill),
                   (":user", Text $ cr_user cr),
                   (":amount", Double (- (cr_amount cr)))]
 
     in if abs (tot_pay - tot_recv) > 0.01
-       then return $ resultBS 200 $ jsonResponse $ jsonError $ "Total payment " ++ (show tot_pay) ++ " doesn't match total receipt " ++ (show tot_recv)
+       then simpleError $ "Total payment " ++ (show tot_pay) ++ " doesn't match total receipt " ++ (show tot_recv)
        else
            do my_uname <- cookieUname $ getInput rq "cookie"
               res <- liftIO $ sqlTransaction db $
@@ -323,10 +332,7 @@ handle_add_bill db rq =
                                  r2 <- mapM (insertPay bill) to_pay
                                  r3 <- mapM (insertReceive bill) to_receive
                                  return $ maybeErrListToMaybeErr (r2 ++ r3)
-              return $ resultBS 200 $ jsonResponse $
-                     case res of
-                       Nothing -> JObj [("result", JString "okay")]
-                       Just err -> jsonError err
+              maybeToResponse res
 
 data BillEntry = BillEntry { be_ident :: Int,
                              be_date :: String,
@@ -357,22 +363,19 @@ handle_remove_bill_attachment db rq =
     let attachIdent = read $ getInput rq "id"
     in
     do my_uname <- whoAmI rq
-       r <- liftIO $ execParamStatement db
+       r <- liftIO $ dbParamStatement db
             "SELECT bills.owner FROM bills,bill_attachments WHERE bill_attachments.attach_ident = :ident AND bills.billident = bill_attachments.bill_ident;"
             [(":ident", Int attachIdent)]
        case r of
          Left msg -> simpleError msg
          Right x ->
-             let (Text owner_uname) = forceLookup "owner" $ head $ concat x
-             in if owner_uname /= my_uname
-                then simpleError "can't remove attachments you don't own"
-                else
-                    do r2 <- liftIO $ execParamStatement_ db
-                             "DELETE FROM bill_attachments WHERE attach_ident = :ident;"
-                             [(":ident", Int attachIdent)]
-                       case r2 of
-                         Nothing -> trivialSuccess
-                         Just msg -> simpleError msg
+             if (rowString "owner" $ head x) /= my_uname
+             then simpleError "can't remove attachments you don't own"
+             else
+                 liftIO $ execParamStatement_ db
+                            "DELETE FROM bill_attachments WHERE attach_ident = :ident;"
+                            [(":ident", Int attachIdent)] >>=
+                            maybeToResponse
                
 attachmentsForBill :: Int64 -> SQLiteHandle -> IO [(Int, String)]
 attachmentsForBill bill db =
@@ -380,12 +383,13 @@ attachmentsForBill bill db =
             (fromInteger $ toInteger ident, fname) where
                 (Int ident) = forceLookup "attach_ident" att
                 (Text fname) = forceLookup "filename" att
+        doFormat =
+            either (error . ((++) "Getting attachments for bill: "))
+                   (map formatAttachment)
     in
-    do r <- execParamStatement db "SELECT attach_ident, filename FROM bill_attachments WHERE bill_ident = :bill"
-            [(":bill", Int bill)]
-       case r of
-         Left msg -> error $ "Getting attachments for bill: " ++ msg
-         Right x -> return $ map formatAttachment $ concat x
+    liftM doFormat $
+          dbParamStatement db "SELECT attach_ident, filename FROM bill_attachments WHERE bill_ident = :bill"
+                               [(":bill", Int bill)]
 
 handle_fetch_statement :: MonadIO m => SQLiteHandle -> Request -> m Response
 handle_fetch_statement db rq =
