@@ -23,8 +23,6 @@ import Text.ParserCombinators.Parsec.Char
 
 import Debug.Trace
 
-deriving instance Show JSON
-
 instance ToJSON a => ToJSON [a] where
     toJSON xs = JList $ map toJSON xs
 
@@ -84,12 +82,12 @@ findBalance db uname =
        case charges of
          Left msg -> return (Left msg)
          Right r ->
-             let unwrap :: Row Value -> Double
-                 unwrap xs =
-                     let (Double r) = snd $ head xs
-                     in r
+             let unwrp :: Row Value -> Double
+                 unwrp xs =
+                     let (Double r2) = snd $ head xs
+                     in r2
              in
-               return $ Right $ sum $ map (unwrap) $ concat r
+               return $ Right $ sum $ map (unwrp) $ concat r
 
 handle_get_user_list :: (MonadIO m) => SQLiteHandle -> m Response
 handle_get_user_list db =
@@ -119,7 +117,7 @@ handle_get_user_list db =
                           Right xs' -> Right (x:xs')
                 case deEither resData of
                     Left msg -> simpleError msg
-                    Right r -> simpleSuccess $ JList r
+                    Right r2 -> simpleSuccess $ JList r2
 
 getInput :: Request -> String -> String
 getInput rq key =
@@ -214,11 +212,11 @@ sqlTransaction db body =
        case r of
          Just msg -> error ("failed to begin transaction: " ++ msg)
          Nothing ->
-             do result <- Control.Exception.onException body (execStatement_ db "ROLLBACK;")
+             do res <- Control.Exception.onException body (execStatement_ db "ROLLBACK;")
                 r2 <- execStatement_ db "COMMIT;"
                 case r2 of
                   Just x -> trace ("failed to commit: " ++ x) $ sqlTransaction db body
-                  Nothing -> return result
+                  Nothing -> return res
 
 deMaybe :: [Maybe x] -> [x]
 deMaybe [] = []
@@ -236,18 +234,21 @@ validate_date :: String -> String
 validate_date what =
     let [year', month', day'] = split_on '-' what
         split_on :: Eq a => a -> [a] -> [[a]]
-        split_on key string =
-            foldr (\char accumulated ->
+        split_on key the_string =
+            foldr (\c accumulated ->
                        case accumulated of
-                         [] -> if char == key
+                         [] -> if c == key
                                then [[]]
-                               else [[char]]
+                               else [[c]]
                          (acc1:accs) ->
-                             if char == key
+                             if c == key
                              then []:accumulated
-                             else (char:acc1):accs) [] string
+                             else (c:acc1):accs) [] the_string
+        year :: Int
         year = read year'
+        month :: Int
         month = read month'
+        day :: Int
         day = read day'
     in if or [length year' /= 4, length month' /= 2, length day' /= 2,
               year < 2008, year > 2020, month < 1, month > 12,
@@ -266,7 +267,8 @@ validate_date what =
                                   then 28
                                   else if year `mod` 4 == 0
                                        then 29
-                                       else 28)
+                                       else 28
+                       _ -> error "bizarre month")
            then error $ "Bad day of month " ++ what
            else what
 
@@ -356,10 +358,10 @@ handle_remove_bill_attachment db rq =
              in if owner_uname /= my_uname
                 then simpleError "can't remove attachments you don't own"
                 else
-                    do r <- liftIO $ execParamStatement_ db
-                            "DELETE FROM bill_attachments WHERE attach_ident = :ident;"
-                            [(":ident", Int attachIdent)]
-                       case r of
+                    do r2 <- liftIO $ execParamStatement_ db
+                             "DELETE FROM bill_attachments WHERE attach_ident = :ident;"
+                             [(":ident", Int attachIdent)]
+                       case r2 of
                          Nothing -> trivialSuccess
                          Just msg -> simpleError msg
                
@@ -373,7 +375,7 @@ attachmentsForBill bill db =
     do r <- execParamStatement db "SELECT attach_ident, filename FROM bill_attachments WHERE bill_ident = :bill"
             [(":bill", Int bill)]
        case r of
-         Left msg -> error "Getting attachments for bill"
+         Left msg -> error $ "Getting attachments for bill: " ++ msg
          Right x -> return $ map formatAttachment $ concat x
 
 handle_fetch_statement :: MonadIO m => SQLiteHandle -> Request -> m Response
@@ -398,7 +400,8 @@ handle_fetch_statement db rq =
                  Right (x::[[Row Value]]) ->
                      case forceLookup "SUM(charges.amount)" $ head $ concat x of
                        Null -> return 0
-                       Double x -> return x
+                       Double y -> return y
+                       _ -> error "typing screw up getting starting balance"
     in do r <- liftIO $ execParamStatement db 
                ("SELECT bills.billident, bills.date, bills.description, charges.amount FROM bills, charges " ++
                 "WHERE bills.date >= :start_date " ++
@@ -509,6 +512,7 @@ handle_old_bills db =
                                       case forceLookup "owner" bill of
                                         Text o -> o
                                         Null -> ""
+                                        _ -> error "typing screw up getting owner of bill"
                           formattedCharges = map formatCharge $ concat charges
                           formattedBills = map formatBill $ concat bills
                           chargesForBill bill =
@@ -522,8 +526,8 @@ handle_old_bills db =
                                                        be_owner = owner,
                                                        be_charges = chargesForBill ident,
                                                        be_attachments = attaches }
-                      in do result <- mapM mkBillEntry formattedBills
-                            simpleSuccess result
+                      in (mapM mkBillEntry formattedBills) >>= 
+                         simpleSuccess
 
 
 composeNothings :: Monad m => m (Maybe x) -> m (Maybe x) -> m (Maybe x)
@@ -582,13 +586,14 @@ get_bill_date_description db ident =
          Left msg -> error msg
          Right [] -> error ("bill " ++ (show ident) ++ " doesn't exist")
          Right [x] ->
-             let unwrap :: Maybe Value -> String
-                 unwrap (Just (Text s)) = s
+             let unwrp :: Maybe Value -> String
+                 unwrp (Just (Text s)) = s
+                 unwrp _ = error "expected a string"
                  x' = concat x
-                 date = unwrap $ lookup "date" x'
-                 description = unwrap $ lookup "description" x'
+                 date = unwrp $ lookup "date" x'
+                 description = unwrp $ lookup "description" x'
              in return (date, description)
-             
+         _ -> error "multiple bills with the same ident?"
 
 whoAmI :: MonadIO m => Request -> m String
 whoAmI rq = cookieUname $ getInput rq "cookie"
@@ -603,6 +608,7 @@ getBillOwner db ident =
          Right x ->
              case forceLookup "owner" $ head $ concat x of
                Text y -> return y
+               _ -> error "typing screw up getting owner of bill"
 
 handle_remove_bill :: (MonadIO m) => SQLiteHandle -> Request -> m Response
 handle_remove_bill db rq =
