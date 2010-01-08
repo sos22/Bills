@@ -22,10 +22,9 @@ Simple billing application
     is_admin = $.jqURL.get("is_admin");
     if (typeof(uname) == "undefined")
       document.location = "/login.html";
+    document.write("Logged in as: " + uname);
 -->
 </script>
-
-Logged in as: <div id="my_own_username"></div><br>
 <form>
 New password:
 <input type="password" alt="New password" id="my_new_password" />

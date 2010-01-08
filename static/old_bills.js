@@ -22,16 +22,19 @@ function refresh_old_bills() {
     new_contents += "<td id=\"" + ident("description") + "\" class=\"old_bill_description\">" + bi.description + "</td>";
     new_contents += "<td>&nbsp;" + bi.owner + "</td>";
     var c = bi.charges;
-    if (c.length > 0)
+    if (c.length > 0) {
 	new_contents += show_charge(c[0]);
-    else
+	nr_to_span = c.length;
+    } else {
 	new_contents += "<td/><td/>";
-    if (owned_by_me) {
-	new_contents += "<td id=\"" + ident("edit") + "\" class=\"old_bill_edit\"><div onclick=\"edit_old_bill(" + bi.ident + ")\">Edit</div></td>";
-	new_contents += "<td id=\"" + ident("remove") + "\" class=\"old_bill_remove\"><div onclick=\"remove_old_bill(" + bi.ident + ")\">Remove</div></td>";
-	new_contents += "<td><iframe src=\"attach_file.html?cookie=" + cookie + "&bill=" + bi.ident + "\">No iframe support?</iframe></td>";
+	nr_to_span = 1;
     }
-    new_contents += "<td id=\"" + ident("clone") + "\" class=\"old_bill_clone\"><div onclick=\"clone_old_bill(" + bi.ident + ")\">Clone</div></td></tr>";
+    if (owned_by_me) {
+	new_contents += "<td rowspan=" + nr_to_span + " id=\"" + ident("edit") + "\" class=\"old_bill_edit\"><div onclick=\"edit_old_bill(" + bi.ident + ")\">Edit</div></td>";
+	new_contents += "<td rowspan=" + nr_to_span + " id=\"" + ident("remove") + "\" class=\"old_bill_remove\"><div onclick=\"remove_old_bill(" + bi.ident + ")\">Remove</div></td>";
+	new_contents += "<td rowspan=" + nr_to_span + "><iframe height=\"70\" frameborder=0 src=\"attach_file.html?cookie=" + cookie + "&bill=" + bi.ident + "\">No iframe support?</iframe></td>";
+    }
+    new_contents += "<td rowspan=" + nr_to_span + " id=\"" + ident("clone") + "\" class=\"old_bill_clone\"><div onclick=\"clone_old_bill(" + bi.ident + ")\">Clone</div></td></tr>";
     for (index = 1; index < c.length; index++) {
        ch = c[index];
        new_contents += "<tr><td colspan=3 />" + show_charge(ch) + "</tr>";
