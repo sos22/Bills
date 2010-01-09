@@ -18,22 +18,11 @@ import GHC.Int
 import Util
 import Json
 import Db
+import ReqResp
 
 filterCharacterUname :: Char -> Char
 filterCharacterUname x | (isAlpha x || isDigit x || x == '_') = x
                        | otherwise = '_'
-
-simpleError :: (Monad m) => String -> m Response
-simpleError msg = return $ resultBS 200 $ jsonResponse $ jsonError msg
-
-simpleSuccess :: (Monad m, ToJSON a) => a -> m Response
-simpleSuccess what = return $ resultBS 200 $ jsonResponse $
-                     JObj [("result", JString "okay"),
-                           ("data", toJSON what)]
-
-trivialSuccess :: Monad m => m Response
-trivialSuccess = return $ resultBS 200 $ jsonResponse $
-                 JObj [("result", JString "okay")]
 
 findBalance :: SQLiteHandle -> String -> IO (Either String Double)
 findBalance db uname =
@@ -58,22 +47,10 @@ handle_get_user_list db =
              liftIO $ (liftM deEither $ mapM doOneEntry r) >>=
                       eitherToResponse) res
 
-getInput :: Request -> String -> String
-getInput rq key =
-    let res = inputValue $ forceLookup key $ rqInputs rq
-    in if BSL.length res > 10000 then "_too_long_"
-       else bslToString res
-
 requireAdmin :: MonadIO m => Request -> m Response -> m Response
 requireAdmin rq doit =
     (isAdmin $ getInput rq "cookie") >>=
     (cond doit (simpleError "Need to be administrator to do that"))
-
-maybeToResponse :: MonadIO m => Maybe String -> m Response
-maybeToResponse = maybe trivialSuccess simpleError
-
-eitherToResponse :: (Monad m, ToJSON b) => Either String b -> m Response
-eitherToResponse = either simpleError simpleSuccess
 
 handle_remove_user :: (MonadIO m) => SQLiteHandle -> Request -> m Response
 handle_remove_user db rq =
