@@ -254,7 +254,9 @@ handle_old_bills db =
                           formattedCharges = map formatCharge charges
                           formattedBills = map formatBill bills
                           chargesForBill bill =
-                               [(ident, user, realToFrac amount) |
+                               [BillCharge {bc_ident = ident,
+                                            bc_who = user,
+                                            bc_amount = amount} |
                                 (ident, bill', user, amount) <- formattedCharges, bill' == bill]
                           mkBillEntry (ident, date, description, owner) =
                                let mk_be attachments =

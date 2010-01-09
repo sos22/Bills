@@ -2,6 +2,7 @@ module Types(Attachment(..),
              StatementEntry(..),
              Statement(..),
              BillEntry(..),
+             BillCharge(..),
              ChargeRecord(..)) where
 
 import HAppS.Server.JSON
@@ -22,11 +23,20 @@ instance FromJSON ChargeRecord where
              _ -> Nothing
     fromJSON _ = Nothing
 
+data BillCharge = BillCharge { bc_ident :: Int,
+                               bc_who :: String,
+                               bc_amount :: Double } deriving Show
+
+instance ToJSON BillCharge where
+    toJSON bc = JObj [("ident", toJSON $ bc_ident bc),
+                      ("charge", toJSON $ bc_amount bc),
+                      ("uname", JString $ bc_who bc)]
+
 data BillEntry = BillEntry { be_ident :: Int,
                              be_date :: String,
                              be_description :: String,
                              be_owner :: String,
-                             be_charges :: [(Int, String, Double)],
+                             be_charges :: [BillCharge],
                              be_attachments :: [Attachment] } deriving Show
 
 instance ToJSON BillEntry where
@@ -34,11 +44,7 @@ instance ToJSON BillEntry where
                       ("date", JString $ be_date be),
                       ("description", JString $be_description be),
                       ("owner", JString $ be_owner be),
-                      ("charges", toJSON [JObj [("ident", JInt ident),
-                                               ("charge", (JFloat $ realToFrac charge)),
-                                               ("uname", (JString user))]
-                                               |
-                                               (ident, user, charge) <- be_charges be]),
+                      ("charges", toJSON $ be_charges be),
                       ("attachments", toJSON $ be_attachments be)]
 
 data Attachment = Attachment { at_ident :: Int64,
