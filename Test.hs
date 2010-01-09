@@ -33,11 +33,11 @@ handle_get_user_list db =
                           ("balance", JFloat $ realToFrac balance)]
             in liftM (rightMap build_return) $ findBalance db uname
     in
-    do res <- liftIO $ dbStatement db "SELECT \"username\" FROM users;"
-       either simpleError
-         (\r ->
-             liftIO $ (liftM deEither $ mapM doOneEntry r) >>=
-                      eitherToResponse) res
+      liftIO $ do res <- dbStatement db "SELECT \"username\" FROM users;"
+                  either simpleError
+                             (\r ->
+                              (liftM deEither $ mapM doOneEntry r) >>=
+                              eitherToResponse) res
 
 handle_remove_user :: (MonadIO m) => SQLiteHandle -> Request -> m Response
 handle_remove_user db rq =
@@ -123,20 +123,20 @@ handle_fetch_statement db rq =
                        (stmt { se_attachments = attaches' })) $
                       attachmentsForBill bill db
         start_balance =
-            do r <- execParamStatement db
+            do r <- dbParamStatement db
                     ("SELECT SUM(charges.amount) FROM bills, charges " ++
                      "WHERE bills.date < :start_date " ++
                      "AND bills.billident == charges.bill " ++
                      "AND charges.user == :uname")
                     [(":start_date", Text start_date),
                      (":uname", Text username)]
-               case r of
-                 Left msg -> error msg
-                 Right (x::[[Row Value]]) ->
-                     case forceLookup "SUM(charges.amount)" $ head $ concat x of
-                       Null -> return 0
-                       Double y -> return y
-                       _ -> error "typing screw up getting starting balance"
+               return $ case r of
+                          Left msg -> error msg
+                          Right x ->
+                              case forceLookup "SUM(charges.amount)" $ head x of
+                                Null -> 0
+                                Double y -> y
+                                _ -> error "typing screw up getting starting balance"
     in do r <- liftIO $ dbParamStatement db 
                ("SELECT bills.billident, bills.date, bills.description, charges.amount FROM bills, charges " ++
                 "WHERE bills.date >= :start_date " ++
@@ -156,16 +156,12 @@ handle_fetch_statement db rq =
                     {- The result doesn't have attachments or balance_after -}
                     parse_row :: Row Value -> (Int64, StatementEntry)
                     parse_row row =
-                        let (Int ident) = forceLookup "billident" row
-                            (Text date) = forceLookup "date" row
-                            (Text description) = forceLookup "description" row
-                            (Double amt) = forceLookup "amount" row
-                        in (ident,
-                            StatementEntry { se_date = date,
-                                             se_description = description,
-                                             se_amount = amt,
-                                             se_balance_after = undefined,
-                                             se_attachments = undefined} )
+                        (rowInt "billident" row,
+                         StatementEntry { se_date = rowString "date" row,
+                                          se_description = rowString "description" row,
+                                          se_amount = rowDouble "amount" row,
+                                          se_balance_after = undefined,
+                                          se_attachments = undefined} )
                     parsed_rows = map parse_row rows
 
                     {- Set the post balances on the statement entries -}
@@ -186,13 +182,13 @@ handle_fetch_statement db rq =
 handle_fetch_attachment :: MonadIO m => SQLiteHandle -> Request -> m Response
 handle_fetch_attachment db rq =
     let ident = read $ getInput rq "id"
-    in do r <- liftIO $ execParamStatement db
+    in do r <- liftIO $ dbParamStatement db
                "SELECT content FROM bill_attachments WHERE attach_ident = :ident;"
                [(":ident", Int ident)]
           case r of
             Left msg -> simpleError msg
             Right x ->
-                let (Blob content) = forceLookup "content" $ head $ concat x
+                let content = rowBlob "content" $ head x
                 in return $ setHeader "content-type" "application/octet-stream" $ resultBS 200 $ BSL.fromChunks [content]
 
 handle_attach_file :: MonadIO m => SQLiteHandle -> Request -> m Response
@@ -217,7 +213,7 @@ handle_attach_file db rq =
                   do r <- liftIO $ execParamStatement_ db
                           "INSERT INTO bill_attachments (\"bill_ident\", \"content\", \"filename\") VALUES (:bill_ident, :content, :filename);"
                           [(":bill_ident", Int billIdent),
-                           (":content", Blob $ BS.concat $ BSL.toChunks file_body),
+                           (":content", Blob $ bslToBS file_body),
                            (":filename", Text file_name)]
                      case r of
                        Just msg -> simpleError msg
@@ -230,33 +226,33 @@ handle_attach_file db rq =
 
 handle_old_bills :: (MonadIO m) => SQLiteHandle -> m Response
 handle_old_bills db =
-    do bills' <- liftIO $ execStatement db "SELECT * FROM bills ORDER BY date DESC;"
+    do bills' <- liftIO $ dbStatement db "SELECT * FROM bills ORDER BY date DESC;"
        case bills' of
          Left msg -> simpleError msg
          Right bills ->
-             do charges' <- liftIO $ execStatement db "SELECT * FROM CHARGES;"
+             do charges' <- liftIO $ dbStatement db "SELECT * FROM CHARGES;"
                 case charges' of
                   Left msg -> simpleError msg
                   Right charges ->
                       let 
                           formatCharge charge =
                               (fromInteger $ toInteger ident, bill, user, amount) where
-                                  (Int ident) = forceLookup "chargeident" charge
-                                  (Int bill) = forceLookup "bill" charge
-                                  (Text user) = forceLookup "user" charge
-                                  (Double amount) = forceLookup "amount" charge
+                                  ident = rowInt "chargeident" charge
+                                  bill = rowInt "bill" charge
+                                  user = rowString "user" charge
+                                  amount = rowDouble "amount" charge
                           formatBill bill =
                               (ident, date, description, owner) where
-                                  (Int ident) = forceLookup "billident" bill
-                                  (Text date) = forceLookup "date" bill
-                                  (Text description) = forceLookup "description" bill
+                                  ident = rowInt "billident" bill
+                                  date = rowString "date" bill
+                                  description = rowString "description" bill
                                   owner =
                                       case forceLookup "owner" bill of
                                         Text o -> o
                                         Null -> ""
                                         _ -> error "typing screw up getting owner of bill"
-                          formattedCharges = map formatCharge $ concat charges
-                          formattedBills = map formatBill $ concat bills
+                          formattedCharges = map formatCharge charges
+                          formattedBills = map formatBill bills
                           chargesForBill bill =
                                [(ident, user, realToFrac amount) |
                                 (ident, bill', user, amount) <- formattedCharges, bill' == bill]

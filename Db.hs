@@ -2,8 +2,9 @@
    sqlite bindings. -}
 module Db(dbStatement, dbParamStatement, sqlTransaction,
           execStatements_,
-          rowDouble, rowString, rowInt) where
+          rowDouble, rowString, rowInt, rowBlob) where
 
+import qualified Data.ByteString as BS
 import Database.SQLite
 import Control.Exception
 import Debug.Trace
@@ -41,7 +42,13 @@ rowInt :: String -> Row Value -> Int64
 rowInt key row =
     case forceLookup key row of
       Int x -> x
-      _ -> error $ "Type error getting string " ++ key
+      _ -> error $ "Type error getting int " ++ key
+
+rowBlob :: String -> Row Value -> BS.ByteString
+rowBlob key row =
+    case forceLookup key row of
+      Blob x -> x
+      _ -> error $ "Type error getting blob " ++ key
 
 sqlTransaction :: SQLiteHandle -> IO x -> IO x
 sqlTransaction db body =

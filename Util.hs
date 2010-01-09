@@ -2,6 +2,7 @@
    trying to do here. -}
 module Util({- BSL manipulations -}
             stringToBSL, bslToString, safeBslToString,
+            bslToBS,
 
             {- Various datastructure manipulations -}
             lookupDefault, forceLookup, forceMaybe,
@@ -14,6 +15,7 @@ module Util({- BSL manipulations -}
            ) where
 
 import qualified Data.ByteString.Lazy as BSL
+import qualified Data.ByteString as BS
 import Char
 
 second :: (a -> b) -> (c, a) -> (c, b)
@@ -31,6 +33,9 @@ safeBslToString bsl =
     if BSL.length bsl > 10000
     then error "unpack very large BSL"
     else bslToString bsl
+
+bslToBS :: BSL.ByteString -> BS.ByteString
+bslToBS = BS.concat . BSL.toChunks
 
 forceMaybe :: Maybe a -> a
 forceMaybe = maybe (error "whoops forced Nothing") id
@@ -121,5 +126,4 @@ validate_date what =
                        _ -> error "bizarre month")
            then error $ "Bad day of month " ++ what
            else what
-
 
