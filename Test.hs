@@ -8,7 +8,6 @@ import HAppS.Server
 import HAppS.Server.JSON
 import Control.Monad.Trans
 import Control.Monad.Identity
-import Control.Exception
 import Char
 import Database.SQLite
 import Data.IORef
@@ -16,10 +15,9 @@ import Random
 import System.IO.Unsafe
 import GHC.Int
 
-import Debug.Trace
-
 import Util
 import Json
+import Db
 
 filterCharacterUname :: Char -> Char
 filterCharacterUname x | (isAlpha x || isDigit x || x == '_') = x
@@ -36,28 +34,6 @@ simpleSuccess what = return $ resultBS 200 $ jsonResponse $
 trivialSuccess :: Monad m => m Response
 trivialSuccess = return $ resultBS 200 $ jsonResponse $
                  JObj [("result", JString "okay")]
-
-dbParamStatement :: SQLiteHandle -> String -> [(String, Value)] -> IO (Either String [Row Value])
-dbParamStatement db query params =
-    do res <- execParamStatement db query params
-       return $ rightMap concat res
-
-dbStatement :: SQLiteHandle -> String -> IO (Either String [Row Value])
-dbStatement db query =
-    do res <- execStatement db query
-       return $ rightMap concat res
-
-rowDouble :: String -> Row Value -> Double
-rowDouble key row =
-    case forceLookup key row of
-      Double x -> x
-      _ -> error $ "Type error getting double " ++ key
-
-rowString :: String -> Row Value -> String
-rowString key row =
-    case forceLookup key row of
-      Text x -> x
-      _ -> error $ "Type error getting string " ++ key
 
 findBalance :: SQLiteHandle -> String -> IO (Either String Double)
 findBalance db uname =
@@ -118,67 +94,6 @@ instance FromJSON ChargeRecord where
                  Just $ ChargeRecord { cr_user = u', cr_amount = read a' }
              _ -> Nothing
     fromJSON _ = Nothing
-
-sqlTransaction :: SQLiteHandle -> IO x -> IO x
-sqlTransaction db body =
-    do r <- execStatement_ db "BEGIN TRANSACTION;"
-       case r of
-         Just msg -> error ("failed to begin transaction: " ++ msg)
-         Nothing ->
-             do res <- Control.Exception.onException body (execStatement_ db "ROLLBACK;")
-                r2 <- execStatement_ db "COMMIT;"
-                case r2 of
-                  Just x -> trace ("failed to commit: " ++ x) $ sqlTransaction db body
-                  Nothing -> return res
-
-maybeErrListToMaybeErr :: [Maybe String] -> Maybe String
-maybeErrListToMaybeErr errs =
-    let errs' = deMaybe errs in
-    case errs' of
-      [] -> Nothing
-      _ -> Just $ foldr (\a b -> a ++ ", " ++ b) "" errs'
-
-validate_date :: String -> String
-validate_date what =
-    let [year', month', day'] = split_on '-' what
-        split_on :: Eq a => a -> [a] -> [[a]]
-        split_on key the_string =
-            foldr (\c accumulated ->
-                       case accumulated of
-                         [] -> if c == key
-                               then [[]]
-                               else [[c]]
-                         (acc1:accs) ->
-                             if c == key
-                             then []:accumulated
-                             else (c:acc1):accs) [] the_string
-        year :: Int
-        year = read year'
-        month :: Int
-        month = read month'
-        day :: Int
-        day = read day'
-    in if or [length year' /= 4, length month' /= 2, length day' /= 2,
-              year < 2008, year > 2020, month < 1, month > 12,
-              day < 1, day > 30]
-       then error $ "Bad date " ++ what
-       else
-           {- 30 -> 9, 4, 6, 11
-              feb -> 2 -}
-           if day > (case month of
-                       x | x `elem` [1,3,5,7,8,9,10,12] -> 31
-                         | x `elem` [4,6,9,11] -> 30
-                         | x == 2 ->
-                             if year `mod` 400 == 0
-                             then 29
-                             else if year `mod` 100 == 0
-                                  then 28
-                                  else if year `mod` 4 == 0
-                                       then 29
-                                       else 28
-                       _ -> error "bizarre month")
-           then error $ "Bad day of month " ++ what
-           else what
 
 handle_add_bill :: (MonadIO m) => SQLiteHandle -> Request -> m Response
 handle_add_bill db rq =
@@ -465,10 +380,6 @@ handle_old_bills db =
                                in liftM (rightMap mk_be) $ attachmentsForBill ident db
                       in liftIO $ (liftM deEither $ mapM mkBillEntry formattedBills) >>= 
                                   eitherToResponse
-
-execStatements_ :: SQLiteHandle -> [(String, [(String, Value)])] -> IO (Maybe String)
-execStatements_ db xs =
-    composeLNothings $ map (uncurry $ execParamStatement_ db) xs
 
 handle_change_bill :: MonadIO m => SQLiteHandle -> Request -> m Response
 handle_change_bill db rq =
