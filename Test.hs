@@ -15,52 +15,15 @@ import Data.IORef
 import Random
 import System.IO.Unsafe
 import GHC.Int
-import Text.ParserCombinators.Parsec.Combinator
-import Text.ParserCombinators.Parsec.Prim hiding (getInput)
-import Text.ParserCombinators.Parsec.Token
-import Text.ParserCombinators.Parsec.Language (haskellDef)
-import Text.ParserCombinators.Parsec.Char
 
 import Debug.Trace
 
-instance ToJSON a => ToJSON [a] where
-    toJSON xs = JList $ map toJSON xs
-
-second :: (a -> b) -> (c, a) -> (c, b)
-second f (a, b) = (a, f b)
-
-stringToBSL :: String -> BSL.ByteString
-stringToBSL = BSL.pack . (map (fromInteger.toInteger.ord))
-
-bslToString :: BSL.ByteString -> String
-bslToString = map (chr . fromInteger . toInteger) . BSL.unpack
-
-safeBslToString :: BSL.ByteString -> String
-safeBslToString bsl =
-    if BSL.length bsl > 10000
-    then error "unpack very large BSL"
-    else bslToString bsl
-
-jsonResponse :: JSON -> BSL.ByteString
-jsonResponse = stringToBSL. jsonToString
-
-forceMaybe :: Maybe a -> a
-forceMaybe = maybe (error "whoops forced Nothing") id
-
-forceLookup :: Eq a => a -> [(a, b)] -> b
-forceLookup key table = forceMaybe $ lookup key table
-
-lookupDefault :: Eq a => a -> [(a,b)] -> b -> b
-lookupDefault key table def =
-    maybe def id (lookup key table)
+import Util
+import Json
 
 filterCharacterUname :: Char -> Char
 filterCharacterUname x | (isAlpha x || isDigit x || x == '_') = x
                        | otherwise = '_'
-
-jsonError :: String -> JSON
-jsonError msg = JObj [("result", JString "error"),
-                      ("error", JString msg)]
 
 simpleError :: (Monad m) => String -> m Response
 simpleError msg = return $ resultBS 200 $ jsonResponse $ jsonError msg
@@ -96,24 +59,12 @@ rowString key row =
       Text x -> x
       _ -> error $ "Type error getting string " ++ key
 
-rightMap :: (a -> b) -> Either c a -> Either c b
-rightMap f (Right x) = Right $ f x
-rightMap _ (Left x) = Left x
-
 findBalance :: SQLiteHandle -> String -> IO (Either String Double)
 findBalance db uname =
     do charges <- dbParamStatement db
                   "SELECT SUM(amount) FROM charges WHERE user = :user"
                   [(":user", Text uname)]
        return $ rightMap ((rowDouble "SUM(amount)") . concat) charges
-
-deEither :: [Either a b] -> Either a [b]
-deEither [] = Right []
-deEither ((Left msg):_) = Left msg
-deEither ((Right x):xs) =
-    case deEither xs of
-      Left msg -> Left msg
-      Right xs' -> Right (x:xs')
 
 handle_get_user_list :: (MonadIO m) => SQLiteHandle -> m Response
 handle_get_user_list db =
@@ -137,10 +88,6 @@ getInput rq key =
     in if BSL.length res > 10000 then "_too_long_"
        else bslToString res
 
-cond :: a -> a -> Bool -> a
-cond t _ True = t
-cond _ f False = f
-
 requireAdmin :: MonadIO m => Request -> m Response -> m Response
 requireAdmin rq doit =
     (isAdmin $ getInput rq "cookie") >>=
@@ -159,71 +106,18 @@ handle_remove_user db rq =
                        [(":user", Text $ getInput rq "username")]) >>=
                       maybeToResponse
 
-jsonParser :: GenParser Char () JSON
-jsonParser =
-    jsonValue
-    where
-      tokenParser = makeTokenParser haskellDef
-      jsonValue =
-          skipSpace >> 
-             (jsonString <|> jsonNumber <|> jsonObject <|> jsonArray
-              <|> jsonTrue <|> jsonFalse <|> jsonNull)
-      skipSpace = many $ oneOf " \r\t\n\v"
-      jsonString = do s <- stringLiteral tokenParser
-                      return $ JString s
-      jsonNumber :: GenParser Char () JSON
-      jsonNumber = do s <- naturalOrFloat tokenParser
-                      return $ case s of
-                        Left i -> jInt i
-                        Right f -> JFloat $ realToFrac f
-      jsonObject :: GenParser Char () JSON
-      jsonObject = do char '{'
-                      body <- sepBy (do skipSpace
-                                        n <- stringLiteral tokenParser
-                                        skipSpace
-                                        char ':'
-                                        skipSpace
-                                        v <- jsonValue
-                                        skipSpace
-                                        return (n,v)) (char ',')
-                      skipSpace
-                      char '}'
-                      return $ JObj body
-      jsonArray = do char '['
-                     skipSpace
-                     body <- sepBy jsonValue (skipSpace >> char ',')
-                     skipSpace
-                     char ']'
-                     return $ JList body
-      jsonTrue = do string "true"
-                    return $ JBool True
-      jsonFalse = do string "false"
-                     return $ JBool False
-      jsonNull = do string "null"
-                    return JNull
-
-parseJSON :: String -> Maybe JSON
-parseJSON what =
-    case parse jsonParser "" what of
-      Left msg -> trace ("error parsing json " ++ what ++ " -> " ++ (show msg)) Nothing
-      Right x -> Just x
-
 data ChargeRecord = ChargeRecord { cr_user :: String,
                                    cr_amount :: Double } deriving Show
 
-parseJsonChargeRecord :: JSON -> ChargeRecord
-parseJsonChargeRecord (JObj fields) =
-    let u = forceLookup "user" fields
-        a = forceLookup "charge" fields
-    in case (a, u) of
-         (JString a', JString u') ->
-             ChargeRecord { cr_user = u', cr_amount = read a' }
-         _ -> error "broken JSON charge record"
-parseJsonChargeRecord _ = error "expected JSON object encoding of charge record"
-
-parseJsonChargeRecords :: JSON -> [ChargeRecord]
-parseJsonChargeRecords (JList i) = map parseJsonChargeRecord i
-parseJsonChargeRecords _ = error "expected JSON list of charge records"
+instance FromJSON ChargeRecord where
+    fromJSON (JObj fields) =
+        let u = lookup "user" fields
+            a = lookup "charge" fields
+        in case (a, u) of
+             (Just (JString a'), Just (JString u')) ->
+                 Just $ ChargeRecord { cr_user = u', cr_amount = read a' }
+             _ -> Nothing
+    fromJSON _ = Nothing
 
 sqlTransaction :: SQLiteHandle -> IO x -> IO x
 sqlTransaction db body =
@@ -236,11 +130,6 @@ sqlTransaction db body =
                 case r2 of
                   Just x -> trace ("failed to commit: " ++ x) $ sqlTransaction db body
                   Nothing -> return res
-
-deMaybe :: [Maybe x] -> [x]
-deMaybe [] = []
-deMaybe (Just x : xs) = x:(deMaybe xs)
-deMaybe (Nothing:xs) = deMaybe xs
 
 maybeErrListToMaybeErr :: [Maybe String] -> Maybe String
 maybeErrListToMaybeErr errs =
@@ -296,9 +185,9 @@ handle_add_bill db rq =
     let description = getInput rq "description"
         date = validate_date $ getInput rq "date"
         to_pay =
-            parseJsonChargeRecords $ forceMaybe $ parseJSON $ getInput rq "to_pay"
+            forceMaybe $ (parseJSON $ getInput rq "to_pay") >>= fromJSON
         to_receive =
-            parseJsonChargeRecords $ forceMaybe $ parseJSON $ getInput rq "to_receive"
+            forceMaybe $ (parseJSON $ getInput rq "to_receive") >>= fromJSON
         tot_pay = sum $ map cr_amount to_pay
         tot_recv = sum $ map cr_amount to_receive
         insertPay :: Integer -> ChargeRecord -> IO (Maybe String)
@@ -340,21 +229,19 @@ data BillEntry = BillEntry { be_ident :: Int,
                              be_description :: String,
                              be_owner :: String,
                              be_charges :: [(Int, String, Double)],
-                             be_attachments :: [(Int, String)] } deriving Show
+                             be_attachments :: [Attachment] } deriving Show
 
 instance ToJSON BillEntry where
     toJSON be = JObj [("ident", JInt $ be_ident be),
                       ("date", JString $ be_date be),
                       ("description", JString $be_description be),
                       ("owner", JString $ be_owner be),
-                      ("charges", JList [JObj [("ident", JInt ident),
+                      ("charges", toJSON [JObj [("ident", JInt ident),
                                                ("charge", (JFloat $ realToFrac charge)),
                                                ("uname", (JString user))]
                                                |
                                                (ident, user, charge) <- be_charges be]),
-                      ("attachments", JList [JObj [("ident", JInt ident),
-                                                   ("name", JString name)]
-                                             | (ident, name) <- be_attachments be])]
+                      ("attachments", toJSON $ be_attachments be)]
 
 maximumUploadSize :: Int64
 maximumUploadSize = 500000
@@ -378,10 +265,11 @@ handle_remove_bill_attachment db rq =
                             [(":ident", Int attachIdent)] >>=
                             maybeToResponse
                
-attachmentsForBill :: Int64 -> SQLiteHandle -> IO (Either String [(Int, String)])
+attachmentsForBill :: Int64 -> SQLiteHandle -> IO (Either String [Attachment])
 attachmentsForBill bill db =
     let formatAttachment att =
-            (fromInteger $ toInteger ident, fname) where
+            Attachment { at_ident = fromInteger $ toInteger ident,
+                         at_filename = fname}  where
                 (Int ident) = forceLookup "attach_ident" att
                 (Text fname) = forceLookup "filename" att
         doFormat = rightMap $ map formatAttachment
@@ -390,15 +278,43 @@ attachmentsForBill bill db =
           dbParamStatement db "SELECT attach_ident, filename FROM bill_attachments WHERE bill_ident = :bill"
                                [(":bill", Int bill)]
 
+data Attachment = Attachment { at_ident :: Int64,
+                               at_filename :: String }
+                deriving Show
+
+instance ToJSON Attachment where
+    toJSON att = JObj [("attach_id", toJSON $ at_ident att),
+                       ("filename", JString $ at_filename att)]
+
+data StatementEntry = StatementEntry { se_date :: String,
+                                       se_description :: String,
+                                       se_amount :: Double,
+                                       se_balance_after :: Double,
+                                       se_attachments :: [Attachment] }
+                    deriving Show
+
+instance ToJSON StatementEntry where
+    toJSON se = JObj [("date", JString $ se_date se),
+                      ("description", JString $ se_description se),
+                      ("amount", toJSON $ se_amount se),
+                      ("balance_after", toJSON $ se_amount se),
+                      ("attachments", toJSON $ se_attachments se)]
+
+data Statement = Statement { stmt_starting_balance :: Double,
+                             stmt_entries :: [ StatementEntry ] }
+instance ToJSON Statement where
+    toJSON stmt = JObj [("starting_balance", toJSON $ stmt_starting_balance stmt),
+                        ("charges", toJSON $ stmt_entries stmt)]
+                         
 handle_fetch_statement :: MonadIO m => SQLiteHandle -> Request -> m Response
 handle_fetch_statement db rq =
     let username = getInput rq "username"
         start_date = getInput rq "start-date"
         end_date = getInput rq "end-date"
-        add_attachments :: (Int64, String, String, Double, Double) -> IO (Either String (String, String, Double, Double, [(Int, String)]))
-        add_attachments (bill, date, descr, amt, pb) =
+        add_attachments :: Int64 -> StatementEntry -> IO (Either String StatementEntry)
+        add_attachments bill stmt =
             liftM (rightMap $ \attaches' ->
-                       (date, descr, amt, pb, attaches')) $
+                       (stmt { se_attachments = attaches' })) $
                       attachmentsForBill bill db
         start_balance =
             do r <- execParamStatement db
@@ -415,7 +331,7 @@ handle_fetch_statement db rq =
                        Null -> return 0
                        Double y -> return y
                        _ -> error "typing screw up getting starting balance"
-    in do r <- liftIO $ execParamStatement db 
+    in do r <- liftIO $ dbParamStatement db 
                ("SELECT bills.billident, bills.date, bills.description, charges.amount FROM bills, charges " ++
                 "WHERE bills.date >= :start_date " ++
                 "AND bills.date <= :end_date " ++
@@ -429,33 +345,37 @@ handle_fetch_statement db rq =
           case r of
             Left msg -> simpleError msg
             Right rows ->
-                let parse_row :: Row Value -> (Int64, String, String, Double)
+                let {- Extract the bill ident, date, description, and quantity
+                       from a query row. -}
+                    {- The result doesn't have attachments or balance_after -}
+                    parse_row :: Row Value -> (Int64, StatementEntry)
                     parse_row row =
                         let (Int ident) = forceLookup "billident" row
                             (Text date) = forceLookup "date" row
                             (Text description) = forceLookup "description" row
                             (Double amt) = forceLookup "amount" row
-                        in (ident, date, description, amt)
-                    parsed_rows = map parse_row $ concat rows
-                    add_post_balances :: [(Int64, String, String, Double)] -> Double -> [(Int64, String, String, Double, Double)]
-                    add_post_balances [] _ = []
-                    add_post_balances ((a, b, c, amt):others) start =
-                        (a,b,c,amt,start+amt):(add_post_balances others (start + amt))
-                    with_post_balances = add_post_balances parsed_rows starting_balance
-                    format_row (date, descr, amt, post_balance, attaches) =
-                        JObj [("date", JString date),
-                              ("description", JString descr),
-                              ("amount", JFloat $ realToFrac amt),
-                              ("balance_after", JFloat $ realToFrac post_balance),
-                              ("attachments",
-                               JList [JObj [("attach_id", JInt aid),
-                                            ("filename", JString fname)]
-                                      | (aid, fname) <- attaches])]
-                in liftIO $ mapM add_attachments with_post_balances >>=
-                            (eitherToResponse .
-                             (rightMap $ \charges -> JObj [("starting_balance", JFloat $ realToFrac starting_balance),
-                                                           ("charges", JList $ map format_row charges)]) .
-                             deEither)
+                        in (ident,
+                            StatementEntry { se_date = date,
+                                             se_description = description,
+                                             se_amount = amt,
+                                             se_balance_after = undefined,
+                                             se_attachments = undefined} )
+                    parsed_rows = map parse_row rows
+
+                    {- Set the post balances on the statement entries -}
+                    add_post_balances :: Double -> [StatementEntry] -> [StatementEntry]
+                    add_post_balances _ [] = []
+                    add_post_balances start (stmt:others) =
+                        (stmt { se_balance_after = start + se_amount stmt}):
+                        (add_post_balances (start + se_amount stmt) others)
+
+                    mkStatement :: [StatementEntry] -> Statement
+                    mkStatement = (Statement starting_balance) . (add_post_balances starting_balance)
+                in liftIO $
+                      (eitherToResponse .
+                       rightMap (toJSON . mkStatement) .
+                       deEither) =<<
+                      mapM (uncurry add_attachments) parsed_rows
 
 handle_fetch_attachment :: MonadIO m => SQLiteHandle -> Request -> m Response
 handle_fetch_attachment db rq =
@@ -546,14 +466,6 @@ handle_old_bills db =
                       in liftIO $ (liftM deEither $ mapM mkBillEntry formattedBills) >>= 
                                   eitherToResponse
 
-composeNothings :: Monad m => m (Maybe x) -> m (Maybe x) -> m (Maybe x)
-composeNothings l r =
-    l >>= maybe r (return . Just)
-
-
-composeLNothings :: Monad m => [m (Maybe x)] -> m (Maybe x)
-composeLNothings = foldr1 composeNothings
-
 execStatements_ :: SQLiteHandle -> [(String, [(String, Value)])] -> IO (Maybe String)
 execStatements_ db xs =
     composeLNothings $ map (uncurry $ execParamStatement_ db) xs
@@ -564,7 +476,7 @@ handle_change_bill db rq =
         date = validate_date $ getInput rq "date"
         ident :: Int64
         ident = read $ getInput rq "id"
-        charges = parseJsonChargeRecords $ forceMaybe $ parseJSON $ getInput rq "charges"
+        charges = forceMaybe $ (parseJSON $ getInput rq "charges") >>= fromJSON
         tot_amount = sum $ map cr_amount charges
         insertCharge charge =
             ("INSERT INTO charges (\"bill\", \"user\", \"amount\") values (:bill, :user, :amount);",
