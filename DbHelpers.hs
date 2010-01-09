@@ -1,6 +1,6 @@
 {- Slightly higher-level database operations -}
 module DbHelpers(
-                 make_login_token, isAdmin, cookieUname, whoAmI,
+                 make_login_token, whoAmI, amIAdmin,
 
                  getBillOwner, get_bill_date_description,
                  attachmentsForBill, findBalance,
@@ -72,7 +72,7 @@ getBillOwner db ident =
    it in an IORef. -}
 requireAdmin :: MonadIO m => Request -> m Response -> m Response
 requireAdmin rq doit =
-    (isAdmin $ getInput rq "cookie") >>=
+    (amIAdmin rq) >>=
     (cond doit (simpleError "Need to be administrator to do that"))
 
 whoAmI :: MonadIO m => Request -> m String
@@ -95,6 +95,9 @@ isAdmin :: MonadIO m => String -> m Bool
 isAdmin cookie =
     liftIO $ liftM ((maybe False snd) . lookup cookie) $
              readIORef login_tokens
+
+amIAdmin :: MonadIO m => Request -> m Bool
+amIAdmin rq = isAdmin $ getInput rq "cookie"
 
 cookieUname :: MonadIO m => String -> m String
 cookieUname cookie =

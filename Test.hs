@@ -74,7 +74,7 @@ handle_add_bill db rq =
     in if abs (tot_pay - tot_recv) > 0.01
        then simpleError $ "Total payment " ++ (show tot_pay) ++ " doesn't match total receipt " ++ (show tot_recv)
        else
-           do my_uname <- cookieUname $ getInput rq "cookie"
+           do my_uname <- whoAmI rq
               res <- liftIO $ sqlTransaction db $
                      do r1 <- execParamStatement_ db
                               "INSERT into bills (\"date\", \"description\", \"owner\") values (:date, :description, :owner);"
@@ -197,7 +197,6 @@ handle_attach_file db rq =
         file = forceLookup "file_to_attach" body
         file_body = inputValue file
         file_name = forceMaybe $ inputFilename file
-        cookie = safeBslToString $ inputValue $ forceLookup "cookie" body
         billIdent :: Int64
         billIdent = read $ safeBslToString $ inputValue $ forceLookup "bill" body
         referer = map (chr . fromInteger . toInteger) $ BS.unpack $ forceMaybe $ getHeader "Referer" rq
@@ -205,7 +204,7 @@ handle_attach_file db rq =
       if BSL.length file_body > maximumUploadSize
       then simpleError "File is too big to attach"
       else
-          do my_uname <- cookieUname cookie
+          do my_uname <- whoAmI rq
              billOwner <- liftIO $ getBillOwner db billIdent
              if billOwner /= my_uname
               then simpleError "Can't attach files to someone else's bills"
@@ -301,9 +300,7 @@ handle_change_bill db rq =
                                  ("DELETE FROM charges WHERE bill = :billident",
                                   [(":billident", Int ident)])] ++
                                 map insertCharge charges
-             case res of
-               Nothing -> trivialSuccess
-               Just msg -> simpleError msg
+             maybeToResponse res
 
 handle_remove_bill :: (MonadIO m) => SQLiteHandle -> Request -> m Response
 handle_remove_bill db rq =
@@ -321,17 +318,15 @@ handle_remove_bill db rq =
                           "DELETE FROM bills WHERE billident = :ident"
                           [(":ident", Int ident)]
                     return $ maybeErrListToMaybeErr [r1, r2]
-          case res of
-            Nothing -> trivialSuccess
-            Just msg -> simpleError msg
+          maybeToResponse res
             
 handle_clone_bill :: (MonadIO m) => SQLiteHandle -> Request -> m Response
 handle_clone_bill db rq =
     let ident = read $ getInput rq "id"
     in
-      do my_uname <- cookieUname $ getInput rq "cookie"
+      do my_uname <- whoAmI rq
          (date, description) <- liftIO $ get_bill_date_description db ident
-         charges' <- liftIO $ execParamStatement db "SELECT \"user\", \"amount\" FROM charges WHERE bill = :ident;"
+         charges' <- liftIO $ dbParamStatement db "SELECT \"user\", \"amount\" FROM charges WHERE bill = :ident;"
                      [(":ident", Int $ fromInteger ident)]
          case charges' of
            Left msg -> simpleError msg
@@ -340,7 +335,7 @@ handle_clone_bill db rq =
                           (user, amount) where
                               (Text user) = forceLookup "user" charge
                               (Double amount) = forceLookup "amount" charge
-                   formattedCharges = map formatCharge $ concat charges
+                   formattedCharges = map formatCharge charges
                    insertCharge bill (user, amount) =
                        execParamStatement_ db
                           "INSERT INTO charges (\"bill\", \"user\", \"amount\") VALUES (:bill, :user, :amount);"
@@ -359,55 +354,36 @@ handle_clone_bill db rq =
                                      do bill <- getLastRowID db
                                         r2 <- mapM (insertCharge bill) formattedCharges
                                         return $ maybeErrListToMaybeErr r2
-                     return $ resultBS 200 $ jsonResponse $
-                            case res of
-                              Nothing -> JObj [("result", JString "okay")]
-                              Just err -> jsonError err
+                     maybeToResponse res
 
 handle_add_user :: (MonadIO m) => SQLiteHandle -> Request -> m Response
 handle_add_user db rq =
-    let inputs = rqInputs rq
-        saneInputs = map (second $ \x ->
-                              if BSL.length (inputValue x) > 100
-                              then "_too_long_"
-                              else bslToString (inputValue x)) inputs
-        uname = map filterCharacterUname $ lookupDefault "username" saneInputs ""
-        cookie = getInput rq "cookie"
+    let uname = map filterCharacterUname $ getInput rq "username"
     in
-    do is_admin <- isAdmin cookie
-       if not is_admin then simpleError "need to be admin to add users"
-        else
-        do
-          res <- liftIO $ execParamStatement_ db
-                 "insert into users (\"username\") values (:user);"
-                 [(":user", Text uname)]
-          return $ resultBS 200 $ jsonResponse $ JObj $ 
-              case res of
-                Nothing -> [("result", JString "okay")]
-                Just "column username is not unique" ->
-                    [("result", JString "error"),
-                     ("error", JString $ "Username " ++ uname ++ " already exists")]
-                Just msg ->
-                    [("result", JString "error"),
-                     ("error", JString msg)]
-
+      requireAdmin rq $
+      do res <- liftIO $ execParamStatement_ db
+                "insert into users (\"username\") values (:user);"
+                [(":user", Text uname)]
+         case res of
+           Nothing -> trivialSuccess
+           Just "column username is not unique" ->
+               simpleError $ "Username " ++ uname ++ " already exists"
+           Just msg -> simpleError msg
 
 handle_change_passwd :: MonadIO m => SQLiteHandle -> Request -> m Response
 handle_change_passwd db rq =
     let uname = getInput rq "username"
         passwd = getInput rq "password"
-    in do is_admin <- isAdmin $ getInput rq "cookie"
-          my_uname <- cookieUname $ getInput rq "cookie"
+    in do is_admin <- amIAdmin rq
+          my_uname <- whoAmI rq
           if not is_admin && my_uname /= uname
            then simpleError "Need to be admin to change someone else's password"
            else
-           do r <- liftIO $ execParamStatement_ db
-                        "UPDATE users SET \"password\" = :password WHERE lower(\"username\") = lower(:uname);"
-                        [(":uname", Text uname),
-                         (":password", Text passwd)]
-              case r of
-                Nothing -> trivialSuccess
-                Just e -> simpleError e
+           liftIO $ execParamStatement_ db
+                      "UPDATE users SET \"password\" = :password WHERE lower(\"username\") = lower(:uname);"
+                      [(":uname", Text uname),
+                       (":password", Text passwd)] >>=
+                      maybeToResponse
 
 handle_set_admin :: MonadIO m => SQLiteHandle -> Request -> m Response
 handle_set_admin db rq =
@@ -417,51 +393,42 @@ handle_set_admin db rq =
               "1" -> "1"
               "0" -> ""
               _ -> error "strange is_admin value"
-    in do is_admin <- isAdmin $ getInput rq "cookie"
-          my_uname <- cookieUname $ getInput rq "cookie"
-          if not is_admin
-           then simpleError "Need to be admin to change administrator flag"
-           else if map toLower my_uname == map toLower uname
+    in requireAdmin rq $
+       do my_uname <- whoAmI rq
+          if map toLower my_uname == map toLower uname
            then simpleError "Can't change your own admin flag"
            else 
-            do r <- liftIO $ execParamStatement_ db
-                        "UPDATE users SET \"is_admin\" = :is_admin WHERE lower(\"username\") = lower(:uname);"
-                        [(":uname", Text uname),
-                         (":is_admin", Text want_admin)]
-               case r of
-                 Nothing -> trivialSuccess
-                 Just e -> simpleError e
+            liftIO $ execParamStatement_ db
+                       "UPDATE users SET \"is_admin\" = :is_admin WHERE lower(\"username\") = lower(:uname);"
+                       [(":uname", Text uname),
+                        (":is_admin", Text want_admin)] >>=
+                       maybeToResponse
 
 handle_login :: MonadIO m => SQLiteHandle -> Request -> m Response
 handle_login db rq =
     let uname = getInput rq "uname"
         password = getInput rq "password"
-    in do r <- liftIO $ execParamStatement db "SELECT username, is_admin FROM users WHERE lower(username) = lower(:uname) AND (password = :password OR (password ISNULL AND :password = \"\"));"
+    in do r <- liftIO $ dbParamStatement db "SELECT username, is_admin FROM users WHERE lower(username) = lower(:uname) AND (password = :password OR (password ISNULL AND :password = \"\"));"
                [(":uname", Text uname),
                 (":password", Text password)]
           case r of
             Left msg -> simpleError msg
-            Right (x::[[Row Value]]) ->
-                case concat x of
-                  [] -> simpleError "login failed"
-                  [is_admin'] ->
-                      let is_admin =
-                            case lookup "is_admin" is_admin' of
-                              Just (Text "1") -> True
-                              _ -> False
-                          is_admin_str = if is_admin then "1"
-                                         else ""
-                          real_uname =
-                            case lookup "username" is_admin' of
-                              Just (Text y) -> y
-                              _ -> error "Huh?"
-                      in
-                      do cookie <- liftIO $ make_login_token real_uname is_admin
-                         let newUrl = "/index.html?cookie=" ++ cookie ++ "&uname=" ++ real_uname ++ "&is_admin=" ++ is_admin_str
-                         return $ addHeader "Location" newUrl $
-                                resultBS 303 $ stringToBSL
+            Right [] -> simpleError "login failed"
+            Right [is_admin'] ->
+                let is_admin =
+                        case lookup "is_admin" is_admin' of
+                          Just (Text "1") -> True
+                          _ -> False
+                    is_admin_str = if is_admin then "1"
+                                   else ""
+                    real_uname = rowString "username" is_admin'
+                in
+                  do cookie <- liftIO $ make_login_token real_uname is_admin
+                     let newUrl = "/index.html?cookie=" ++ cookie ++ "&uname=" ++ real_uname ++ "&is_admin=" ++ is_admin_str
+                     return $ addHeader "Location" newUrl $
+                            resultBS 303 $ stringToBSL
                                              "<html><head><title>Redirect</title></head><Body>Redirecting...</body></html>"
-                  _ -> simpleError "database corrupt"
+            _ -> simpleError "database corrupt"
 
 main :: IO ()
 main =

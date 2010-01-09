@@ -2,7 +2,6 @@
    with -}
 module ReqResp where
 
-import qualified Data.ByteString.Lazy as BSL
 import HAppS.Server
 import HAppS.Server.JSON
 import Control.Monad.Trans
@@ -30,7 +29,5 @@ eitherToResponse = either simpleError simpleSuccess
 
 getInput :: Request -> String -> String
 getInput rq key =
-    let res = inputValue $ forceLookup key $ rqInputs rq
-    in if BSL.length res > 10000 then "_too_long_"
-       else bslToString res
+    safeBslToString $ inputValue $ forceLookup key $ rqInputs rq
 
