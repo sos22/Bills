@@ -2,11 +2,12 @@
    sqlite bindings. -}
 module Db(dbStatement, dbParamStatement, sqlTransaction,
           execStatements_,
-          rowDouble, rowString) where
+          rowDouble, rowString, rowInt) where
 
 import Database.SQLite
 import Control.Exception
 import Debug.Trace
+import GHC.Int
 
 import Util
 
@@ -34,6 +35,12 @@ rowString :: String -> Row Value -> String
 rowString key row =
     case forceLookup key row of
       Text x -> x
+      _ -> error $ "Type error getting string " ++ key
+
+rowInt :: String -> Row Value -> Int64
+rowInt key row =
+    case forceLookup key row of
+      Int x -> x
       _ -> error $ "Type error getting string " ++ key
 
 sqlTransaction :: SQLiteHandle -> IO x -> IO x

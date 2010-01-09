@@ -10,26 +10,18 @@ import Control.Monad.Trans
 import Control.Monad.Identity
 import Char
 import Database.SQLite
-import Data.IORef
-import Random
-import System.IO.Unsafe
 import GHC.Int
 
 import Util
 import Json
 import Db
 import ReqResp
+import DbHelpers
+import Types
 
 filterCharacterUname :: Char -> Char
 filterCharacterUname x | (isAlpha x || isDigit x || x == '_') = x
                        | otherwise = '_'
-
-findBalance :: SQLiteHandle -> String -> IO (Either String Double)
-findBalance db uname =
-    do charges <- dbParamStatement db
-                  "SELECT SUM(amount) FROM charges WHERE user = :user"
-                  [(":user", Text uname)]
-       return $ rightMap ((rowDouble "SUM(amount)") . concat) charges
 
 handle_get_user_list :: (MonadIO m) => SQLiteHandle -> m Response
 handle_get_user_list db =
@@ -47,30 +39,12 @@ handle_get_user_list db =
              liftIO $ (liftM deEither $ mapM doOneEntry r) >>=
                       eitherToResponse) res
 
-requireAdmin :: MonadIO m => Request -> m Response -> m Response
-requireAdmin rq doit =
-    (isAdmin $ getInput rq "cookie") >>=
-    (cond doit (simpleError "Need to be administrator to do that"))
-
 handle_remove_user :: (MonadIO m) => SQLiteHandle -> Request -> m Response
 handle_remove_user db rq =
     requireAdmin rq $ (liftIO $ execParamStatement_ db
                        "delete from users where username=:user;"
                        [(":user", Text $ getInput rq "username")]) >>=
                       maybeToResponse
-
-data ChargeRecord = ChargeRecord { cr_user :: String,
-                                   cr_amount :: Double } deriving Show
-
-instance FromJSON ChargeRecord where
-    fromJSON (JObj fields) =
-        let u = lookup "user" fields
-            a = lookup "charge" fields
-        in case (a, u) of
-             (Just (JString a'), Just (JString u')) ->
-                 Just $ ChargeRecord { cr_user = u', cr_amount = read a' }
-             _ -> Nothing
-    fromJSON _ = Nothing
 
 handle_add_bill :: (MonadIO m) => SQLiteHandle -> Request -> m Response
 handle_add_bill db rq =
@@ -116,25 +90,6 @@ handle_add_bill db rq =
                                  return $ maybeErrListToMaybeErr (r2 ++ r3)
               maybeToResponse res
 
-data BillEntry = BillEntry { be_ident :: Int,
-                             be_date :: String,
-                             be_description :: String,
-                             be_owner :: String,
-                             be_charges :: [(Int, String, Double)],
-                             be_attachments :: [Attachment] } deriving Show
-
-instance ToJSON BillEntry where
-    toJSON be = JObj [("ident", JInt $ be_ident be),
-                      ("date", JString $ be_date be),
-                      ("description", JString $be_description be),
-                      ("owner", JString $ be_owner be),
-                      ("charges", toJSON [JObj [("ident", JInt ident),
-                                               ("charge", (JFloat $ realToFrac charge)),
-                                               ("uname", (JString user))]
-                                               |
-                                               (ident, user, charge) <- be_charges be]),
-                      ("attachments", toJSON $ be_attachments be)]
-
 maximumUploadSize :: Int64
 maximumUploadSize = 500000
 
@@ -157,47 +112,6 @@ handle_remove_bill_attachment db rq =
                             [(":ident", Int attachIdent)] >>=
                             maybeToResponse
                
-attachmentsForBill :: Int64 -> SQLiteHandle -> IO (Either String [Attachment])
-attachmentsForBill bill db =
-    let formatAttachment att =
-            Attachment { at_ident = fromInteger $ toInteger ident,
-                         at_filename = fname}  where
-                (Int ident) = forceLookup "attach_ident" att
-                (Text fname) = forceLookup "filename" att
-        doFormat = rightMap $ map formatAttachment
-    in
-    liftM doFormat $
-          dbParamStatement db "SELECT attach_ident, filename FROM bill_attachments WHERE bill_ident = :bill"
-                               [(":bill", Int bill)]
-
-data Attachment = Attachment { at_ident :: Int64,
-                               at_filename :: String }
-                deriving Show
-
-instance ToJSON Attachment where
-    toJSON att = JObj [("attach_id", toJSON $ at_ident att),
-                       ("filename", JString $ at_filename att)]
-
-data StatementEntry = StatementEntry { se_date :: String,
-                                       se_description :: String,
-                                       se_amount :: Double,
-                                       se_balance_after :: Double,
-                                       se_attachments :: [Attachment] }
-                    deriving Show
-
-instance ToJSON StatementEntry where
-    toJSON se = JObj [("date", JString $ se_date se),
-                      ("description", JString $ se_description se),
-                      ("amount", toJSON $ se_amount se),
-                      ("balance_after", toJSON $ se_amount se),
-                      ("attachments", toJSON $ se_attachments se)]
-
-data Statement = Statement { stmt_starting_balance :: Double,
-                             stmt_entries :: [ StatementEntry ] }
-instance ToJSON Statement where
-    toJSON stmt = JObj [("starting_balance", toJSON $ stmt_starting_balance stmt),
-                        ("charges", toJSON $ stmt_entries stmt)]
-                         
 handle_fetch_statement :: MonadIO m => SQLiteHandle -> Request -> m Response
 handle_fetch_statement db rq =
     let username = getInput rq "username"
@@ -393,39 +307,6 @@ handle_change_bill db rq =
                Nothing -> trivialSuccess
                Just msg -> simpleError msg
 
-get_bill_date_description :: SQLiteHandle -> Integer -> IO (String, String)
-get_bill_date_description db ident =
-    do (bills::(Either String [[Row Value]])) <-
-           execParamStatement db "SELECT \"date\", \"description\" FROM bills WHERE billident = :ident ORDER BY date DESC;"
-                [(":ident", Int $ fromInteger ident)]
-       case bills of 
-         Left msg -> error msg
-         Right [] -> error ("bill " ++ (show ident) ++ " doesn't exist")
-         Right [x] ->
-             let unwrp :: Maybe Value -> String
-                 unwrp (Just (Text s)) = s
-                 unwrp _ = error "expected a string"
-                 x' = concat x
-                 date = unwrp $ lookup "date" x'
-                 description = unwrp $ lookup "description" x'
-             in return (date, description)
-         _ -> error "multiple bills with the same ident?"
-
-whoAmI :: MonadIO m => Request -> m String
-whoAmI rq = cookieUname $ getInput rq "cookie"
-
-getBillOwner :: SQLiteHandle -> Int64 -> IO String
-getBillOwner db ident =
-    do r0 <- execParamStatement db
-             "SELECT owner FROM bills WHERE billident = :ident"
-             [(":ident", Int ident)]
-       case r0 of
-         Left msg -> error $ "Getting bill owner: " ++ msg
-         Right x ->
-             case forceLookup "owner" $ head $ concat x of
-               Text y -> return y
-               _ -> error "typing screw up getting owner of bill"
-
 handle_remove_bill :: (MonadIO m) => SQLiteHandle -> Request -> m Response
 handle_remove_bill db rq =
     let ident = read $ getInput rq "id"
@@ -552,33 +433,6 @@ handle_set_admin db rq =
                case r of
                  Nothing -> trivialSuccess
                  Just e -> simpleError e
-
-{- Mapping from cookies to user names -}
-login_tokens :: IORef [(String, (String, Bool))]
-{-# NOINLINE login_tokens #-}
-login_tokens =
-    unsafePerformIO $ newIORef []
-
-make_login_token :: String -> Bool -> IO String
-make_login_token uname is_admin =
-    do (asInt::Integer) <- randomIO
-       let res = show $ abs asInt
-       modifyIORef login_tokens $ (:) (res,(uname,is_admin))
-       return res
-
-isAdmin :: MonadIO m => String -> m Bool
-isAdmin cookie =
-    do tokns <- liftIO $ readIORef login_tokens
-       case lookup cookie tokns of
-         Just (_, x) -> return x
-         Nothing -> return False
-
-cookieUname :: MonadIO m => String -> m String
-cookieUname cookie =
-    do tokns <- liftIO $ readIORef login_tokens
-       case lookup cookie tokns of
-         Just (x, _) -> return x
-         Nothing -> error "bad cookie"
 
 handle_login :: MonadIO m => SQLiteHandle -> Request -> m Response
 handle_login db rq =
