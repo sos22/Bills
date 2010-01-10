@@ -53,3 +53,15 @@ function hidable(label, content, id) {
 	"<div id=\"" + id + "\">" + content + "</div>";
     return res;
 }
+
+function td(s) {
+    return "<td>" + s + "</td>";
+}
+function escape_quotes(s) {
+    return s.replace(/"/g, "&quot;");
+}
+
+/* A clickable button */
+function action(label, act) {
+    return "<a onclick=\"" + escape_quotes(act) + "\">" + label + "</a>";
+}

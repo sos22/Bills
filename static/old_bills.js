@@ -28,22 +28,23 @@ function refresh_old_bills() {
 	nr_to_span = 1;
     }
     if (owned_by_me) {
-	new_contents += "<td rowspan=" + nr_to_span + " id=\"" + ident("edit") + "\" class=\"old_bill_edit\"><div onclick=\"edit_old_bill(" + bi.ident + ")\">Edit</div></td>";
-	new_contents += "<td rowspan=" + nr_to_span + " id=\"" + ident("remove") + "\" class=\"old_bill_remove\"><div onclick=\"remove_old_bill(" + bi.ident + ")\">Remove</div></td>";
+	new_contents += "<td rowspan=" + nr_to_span + " id=\"" + ident("edit") + "\" class=\"old_bill_edit\">" + action("Edit", "edit_old_bill(\"" + bi.ident + "\")") + "</td>";
+	new_contents += "<td rowspan=" + nr_to_span + " id=\"" + ident("remove") + "\" class=\"old_bill_remove\">" + action("Remove", "remove_old_bill(\"" + bi.ident + "\")") + "</td>";
 	new_contents += "<td rowspan=" + nr_to_span + "><iframe height=\"70\" frameborder=0 src=\"attach_file.html?cookie=" + cookie + "&bill=" + bi.ident + "\">No iframe support?</iframe></td>";
     }
-    new_contents += "<td rowspan=" + nr_to_span + " id=\"" + ident("clone") + "\" class=\"old_bill_clone\"><div onclick=\"clone_old_bill(" + bi.ident + ")\">Clone</div></td></tr>";
+    new_contents += "<td rowspan=" + nr_to_span + " id=\"" + ident("clone") + "\" class=\"old_bill_clone\">" + action("Clone", "clone_old_bill(\"" + bi.ident + "\")") + "</td></tr>";
     for (index = 1; index < c.length; index++) {
        ch = c[index];
        new_contents += "<tr><td colspan=3 />" + show_charge(ch) + "</tr>";
     }
     for (index = 0; index < bi.attachments.length; index++) {
 	a = bi.attachments[index];
-	alert(a);
-	alert(a.filename);
 	new_contents += "<tr><td colspan=3 /><td colspan=2><a href=\"action/fetch_attachment?id=" + a.attach_id + "\">View attachment " + a.filename + "</a></td>";
 	if (owned_by_me) {
-	    new_contents += "<td colspan=4><div onclick=\"remove_attachment(" + a.ident + ")\">Remove attachment</div></td";
+	    new_contents +=
+		"<td colspan=4>" + action("Remove attachment",
+					  "remove_attachment(\"" + a.ident + "\")") +
+		"</td>";
 	}
 	new_contents += "</tr>";
     }
@@ -122,7 +123,7 @@ function edit_old_bill(ident) {
 	    content += "</select>";
 	    item.innerHTML = content;
 	} else if (cl == "old_bill_edit") {
-	    item.innerHTML = "<div onclick=\"done_old_bill(" + ident + ")\">Done</div>";
+	    item.innerHTML = action("Done", "done_old_bill(\"" + ident + "\")");
 	} else if (cl == "old_bill_charge") {
 	    item.innerHTML = "<input id=\"" + id + "_edit\" value=\"" + val + "\">";
 	}

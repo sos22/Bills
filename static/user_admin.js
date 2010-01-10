@@ -19,19 +19,21 @@ Known users: <div id=\"known_user_list\"> Loading... </div>\
 }
 
 function refresh_known_users(known_users) {
-  var newContents = "<table>"
-  for (var k in known_users) {
-    newContents += "<tr>";
-    newContents += "<td>" + known_users[k].uname + "</td>";
-    newContents += "<td><a onclick=\"remove_user(&quot;" + known_users[k].uname + "&quot;)\">Remove</a></td>";
-    newContents += "<td><input type=\"password\" name=\"password\" id=\"change_password_new_" + known_users[k].uname + "\" /><a onclick=\"change_password(&quot;" + known_users[k].uname + "&quot;)\">Change password</a></td>";
-    newContents += "<td><a onclick=\"grant_admin(&quot;" + known_users[k].uname + "&quot;)\">Grant admin access</a></td>";
-    newContents += "<td><a onclick=\"revoke_admin(&quot;" + known_users[k].uname + "&quot;)\">Revoke admin access</a></td>";
-    newContents += "<td id=\"change_user_" + known_users[k].uname + "_error\"></td>"
-    newContents += "</tr>";
-  }
-  newContents += "</table>";
-  $("#known_user_list").html(newContents);
+    var newContents = "<table>";
+    for (var k in known_users) {
+	newContents +="<tr>";
+	newContents += td(known_users[k].uname);
+	newContents += td(action("Remove", "remove_user(\"" + known_users[k].uname + "\")"));
+	newContents +=
+	    td("<input type=\"password\" name=\"password\" id=\"change_password_new_" + known_users[k].uname + "\" />" +
+	       action("Change password", "change_password(\"" + known_users[k].uname + "\")"));
+	newContents += td(action("Grant admin access", "grant_admin(\"" + known_users[k].uname + "\")"));
+	newContents += td(action("Revoke admin access", "revoke_admin(\"" + known_users[k].uname + "\")"));
+	newContents += "<td id=\"change_user_" + known_users[k].uname + "_error\"></td>";
+	newContents += "</tr>";
+    }
+    newContents += "</table>";
+    $("#known_user_list").html(newContents);
 }
 
 function add_user_submit() {
