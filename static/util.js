@@ -49,7 +49,7 @@ function hidable(label, content, id) {
        undefined on Firefox 3.5, but if we assign to a local variable
        and return that then everything works. */
     var res =
-	"<a onclick=\"toggle_visible(&quot;" + id + "&quot;)\">" + label + "</a>" + 
+	action(label, "toggle_visible(\"" + id + "\")") +
 	"<div id=\"" + id + "\">" + content + "</div>";
     return res;
 }
@@ -63,5 +63,5 @@ function escape_quotes(s) {
 
 /* A clickable button */
 function action(label, act) {
-    return "<a onclick=\"" + escape_quotes(act) + "\">" + label + "</a>";
+    return "<a class=\"effaceable\" onclick=\"" + escape_quotes(act) + "\">" + label + "</a>";
 }
