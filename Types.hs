@@ -66,7 +66,7 @@ instance ToJSON StatementEntry where
     toJSON se = JObj [("date", JString $ se_date se),
                       ("description", JString $ se_description se),
                       ("amount", toJSON $ se_amount se),
-                      ("balance_after", toJSON $ se_amount se),
+                      ("balance_after", toJSON $ se_balance_after se),
                       ("attachments", toJSON $ se_attachments se)]
 
 data Statement = Statement { stmt_starting_balance :: Double,

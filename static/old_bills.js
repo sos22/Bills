@@ -2,6 +2,20 @@ function make_old_bills() {
     document.write(hidable("Old bills", "", "old_bills"));
 }
 
+_highlighted_bill = null;
+function set_bill_highlight(new_highlight) {
+    var o = $("#old_bill_" + _highlighted_bill);
+    if (o != null) {
+	o.removeClass("highlighted_bill");
+    }
+    var n = $("#old_bill_" + new_highlight);
+    if (n != null) {
+	n.addClass("highlighted_bill");
+    }
+    _highlighted_bill = new_highlight;
+}
+
+
 function refresh_old_bills() {
     var new_contents = "<table border=1 cellspacing=0>";
     new_contents += "<h3><thead><tr><td>Date</td><td>Description</td><td>Created by</td><td>Charged user</td><td>Charge amount</td></tr></thead></h3>";
@@ -53,6 +67,7 @@ function refresh_old_bills() {
   }
   new_contents += "</table>";
   $("#old_bills").html(new_contents);
+  set_bill_highlight(_highlighted_bill);
 }
 
 function get_old_bills() {
@@ -130,6 +145,7 @@ function edit_old_bill(ident) {
     }
 
     add_new_charge_to_bill(ident);
+    set_bill_highlight(ident);
 }
 
 function done_old_bill(ident) {
@@ -174,6 +190,7 @@ function done_old_bill(ident) {
 	return;
     }
     err("Submitting new bill...");
+    set_bill_highlight(ident);
     do_action("action/change_bill",
 	      {"description": description,
 	       "id": parseInt(ident),
@@ -195,6 +212,7 @@ function clone_old_bill(ident) {
 	      {"id": parseInt(ident) },
 	      function(data) {
 		  if (data.result == "okay") {
+		      set_bill_highlight(data.data);
 		      get_old_bills();
 		      get_known_users();
 		  }

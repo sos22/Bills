@@ -349,12 +349,14 @@ handle_clone_bill db rq =
                                       (":description", Text description),
                                       (":owner", Text my_uname)]
                                case r1 of
-                                 Just err -> return $ Just err
+                                 Just err -> return $ Left err
                                  Nothing ->
                                      do bill <- getLastRowID db
                                         r2 <- mapM (insertCharge bill) formattedCharges
-                                        return $ maybeErrListToMaybeErr r2
-                     maybeToResponse res
+                                        case maybeErrListToMaybeErr r2 of
+                                          Nothing -> return $ Right bill
+                                          Just err -> return $ Left err
+                     eitherToResponse res
 
 handle_add_user :: (MonadIO m) => SQLiteHandle -> Request -> m Response
 handle_add_user db rq =

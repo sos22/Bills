@@ -23,6 +23,9 @@ instance ToJSON Int64 where
 instance ToJSON Int where
     toJSON i = JInt i
 
+instance ToJSON Integer where
+    toJSON i = JInt $ fromInteger i
+
 instance ToJSON Double where
     toJSON d = JFloat $ realToFrac d
 
