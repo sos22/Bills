@@ -43,7 +43,7 @@ function refresh_old_bills() {
 	if (owned_by_me) {
 	    new_contents +=
 		"<td colspan=4>" + action("Remove attachment",
-					  "remove_attachment(\"" + a.ident + "\")") +
+					  "remove_attachment(\"" + a.attach_id + "\")") +
 		"</td>";
 	}
 	new_contents += "</tr>";
@@ -249,6 +249,8 @@ function remove_attachment(ident) {
 		  if (data.result == "okay") {
 		      get_old_bills();
 		      get_known_users();
+		  } else {
+		      alert("Error removing attachment:" + data.error);
 		  }
 	      });
 }
