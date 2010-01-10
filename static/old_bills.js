@@ -1,7 +1,5 @@
 function make_old_bills() {
-    document.write("\
-<a onclick=\"toggle_visible(&quot;old_bills&quot;)\">Old bills</a>\
-<div id=\"old_bills\"></div>");
+    document.write(hidable("Old bills", "", "old_bills"));
 }
 
 function refresh_old_bills() {
@@ -41,7 +39,9 @@ function refresh_old_bills() {
     }
     for (index = 0; index < bi.attachments.length; index++) {
 	a = bi.attachments[index];
-	new_contents += "<tr><td colspan=3 /><td colspan=2><a href=\"action/fetch_attachment?id=" + a.ident + "\">View attachment " + a.name + "</a></td>";
+	alert(a);
+	alert(a.filename);
+	new_contents += "<tr><td colspan=3 /><td colspan=2><a href=\"action/fetch_attachment?id=" + a.attach_id + "\">View attachment " + a.filename + "</a></td>";
 	if (owned_by_me) {
 	    new_contents += "<td colspan=4><div onclick=\"remove_attachment(" + a.ident + ")\">Remove attachment</div></td";
 	}

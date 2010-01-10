@@ -1,8 +1,5 @@
 function make_balances() {
-    document.write("\
-<a onclick=\"toggle_visible(&quot;balances&quot;)\">Balances</a>	\
-<div id=\"balances\"></div>\
-");
+    document.write(hidable("Balances", "", "balances"));
 }
 
 function refresh_balances(known_users) {

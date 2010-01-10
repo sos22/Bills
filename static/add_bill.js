@@ -1,7 +1,7 @@
 function make_add_bill() {
-    document.write("\
-<a onclick=\"toggle_visible(&quot;bills&quot;)\"> Add bill </a>\
-<div class=\"visible\" id=\"bills\">\
+    document.write(
+	hidable("Add bill",
+		"\
 <form id=\"add_bill_form\">\
 <ul>\
   <li> Description: <input type=\"text\" id=\"add_bill_description\"> </li>\
@@ -25,8 +25,7 @@ function make_add_bill() {
 <input type=\"button\" onclick=\"add_bill_submit()\" value=\"Add bill\">\
 <div id=\"add_bill_error\"></div>\
 </form>\
-</div>\
-");
+"));
     $("#add_bill_who_eqlist_split").hide();
     $("#add_bill_who_custom_split").hide();
     $("#add_bill_whom_custom_split").hide();

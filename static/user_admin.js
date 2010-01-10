@@ -1,24 +1,18 @@
 function make_user_management() {
-    document.write("\
-<a onclick=\"toggle_visible(&quot;user_management&quot;)\"> User management </a>\
-<div id=\"user_management\">\
+    document.write(
+	hidable("User management",
+		"\
 <p>\
 Known users: <div id=\"known_user_list\"> Loading... </div>\
 </p>\
-<ul>\
-  <li>\
-    <a onclick=\"script:toggle_visible(&quot;div:add_user&quot;)\"> Add user </a>\
-    <div id=\"add_user\">\
-       <form>\
-	 Username: <input type=\"text\" name=\"username\" alt=\"User name\" id=\"add_user_username\">\
-         <input type=\"button\" onclick=\"add_user_submit()\" value=\"Add user\">\
-	 <div id=\"add_user_error\"></div>\
-       </form>\
-    </div>\
-  </li>\
-</ul>\
+<div id=\"add_user\">\
+   <form>\
+     Username: <input type=\"text\" name=\"username\" alt=\"User name\" id=\"add_user_username\">\
+     <input type=\"button\" onclick=\"add_user_submit()\" value=\"Add user\">\
+     <div id=\"add_user_error\"></div>\
+   </form>\
 </div>\
-");
+"));
     $("#user_management").hide();
 
     register_user_listener(refresh_known_users);

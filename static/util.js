@@ -38,3 +38,18 @@ function do_action(action, params, continuation) {
     params["cookie"] = cookie;
     jQuery.post(action, params, continuation, "json");
 }
+
+_next_hidable_id = 0;
+function hidable(label, content, id) {
+    if (id == null) {
+	id = "_hidable_" + _next_hidable_id;
+	_next_hidable_id++;
+    }
+    /* WTF? If we just return this straight off, it comes out as
+       undefined on Firefox 3.5, but if we assign to a local variable
+       and return that then everything works. */
+    var res =
+	"<a onclick=\"toggle_visible(&quot;" + id + "&quot;)\">" + label + "</a>" + 
+	"<div id=\"" + id + "\">" + content + "</div>";
+    return res;
+}
