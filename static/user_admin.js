@@ -26,7 +26,7 @@ function refresh_known_users(known_users) {
 	newContents += td(action("Remove", "remove_user(\"" + known_users[k].uname + "\")"));
 	newContents +=
 	    td("<input type=\"password\" name=\"password\" id=\"change_password_new_" + known_users[k].uname + "\" />" +
-	       action("Change password", "change_password(\"" + known_users[k].uname + "\")"));
+	       action("Change&nbsp;password", "change_password(\"" + known_users[k].uname + "\")"));
 	newContents += td(action("Grant admin access", "grant_admin(\"" + known_users[k].uname + "\")"));
 	newContents += td(action("Revoke admin access", "revoke_admin(\"" + known_users[k].uname + "\")"));
 	newContents += "<td id=\"change_user_" + known_users[k].uname + "_error\"></td>";
