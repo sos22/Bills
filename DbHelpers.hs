@@ -1,4 +1,4 @@
-{-# LANGUAGE ScopedTypeVariables #-}
+{-# LANGUAGE ScopedTypeVariables, PatternSignatures #-}
 {- Slightly higher-level database operations -}
 module DbHelpers(
                  make_login_token, whoAmI, amIAdmin,

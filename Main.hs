@@ -23,8 +23,8 @@ filterCharacterUname :: Char -> Char
 filterCharacterUname x | (isAlpha x || isDigit x || x == '_') = x
                        | otherwise = '_'
 
-handle_get_user_list :: (MonadIO m) => SQLiteHandle -> m Response
-handle_get_user_list db =
+handle_get_user_list :: (MonadIO m) => SQLiteHandle -> Request -> m Response
+handle_get_user_list db _ =
     let doOneEntry :: Row Value -> IO (Either String JSON)
         doOneEntry r =
             let uname = rowString "username" r
@@ -223,8 +223,8 @@ handle_attach_file db rq =
                                      resultBS 303 $ stringToBSL $
                                               "<html><body><a href=\"" ++ referer ++ "\">Redirecting...</a></body></html>"
 
-handle_old_bills :: (MonadIO m) => SQLiteHandle -> m Response
-handle_old_bills db =
+handle_old_bills :: (MonadIO m) => SQLiteHandle -> Request -> m Response
+handle_old_bills db _ =
     do bills' <- liftIO $ dbStatement db "SELECT * FROM bills ORDER BY date DESC;"
        case bills' of
          Left msg -> simpleError msg
@@ -441,7 +441,7 @@ main =
                                [dir "add_user"
                                         [withRequest $ handle_add_user db],
                                 dir "get_user_list"
-                                    [handle_get_user_list db],
+                                    [withRequest $ handle_get_user_list db],
                                 dir "remove_user"
                                     [withRequest $ handle_remove_user db],
                                 dir "change_password"
@@ -455,7 +455,7 @@ main =
                                 dir "clone_bill"
                                     [withRequest $ handle_clone_bill db],
                                 dir "old_bills"
-                                    [handle_old_bills db],
+                                    [withRequest $ handle_old_bills db],
                                 dir "remove_bill"
                                     [withRequest $ handle_remove_bill db],
                                 dir "login"

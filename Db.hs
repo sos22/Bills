@@ -51,13 +51,17 @@ rowBlob key row =
       Blob x -> x
       _ -> error $ "Type error getting blob " ++ key
 
+onException :: IO a -> IO b -> IO a
+onException io what = io `Control.Exception.catch` \e -> do _ <- what
+                                          	            throw e
+
 sqlTransaction :: SQLiteHandle -> IO x -> IO x
 sqlTransaction db body =
     do r <- execStatement_ db "BEGIN TRANSACTION;"
        case r of
          Just msg -> error ("failed to begin transaction: " ++ msg)
          Nothing ->
-             do res <- Control.Exception.onException body (execStatement_ db "ROLLBACK;")
+             do res <- onException body (execStatement_ db "ROLLBACK;")
                 r2 <- execStatement_ db "COMMIT;"
                 case r2 of
                   Just x -> trace ("failed to commit: " ++ x) $ sqlTransaction db body
