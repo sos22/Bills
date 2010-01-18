@@ -1,0 +1,12 @@
+Name: Bills
+Version: 0.0
+Description: Trivial billing application
+License: GPL
+Author: Steven Smith
+Build-Type: Simple
+Cabal-Version: >=1.2
+data-files: mkdb.sh
+ 
+Executable Main
+       Main-is: Main.hs
+       Build-Depends: base >= 3, haskell98, bytestring >= 0.9, parsec >= 2.0, HAppS-Server >= 0.9, mtl >= 1.0, sqlite >= 0.4

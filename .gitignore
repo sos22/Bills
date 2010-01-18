@@ -2,3 +2,5 @@
 *.hi
 Main
 local/
+Setup
+dist/
