@@ -30,6 +30,7 @@ rowDouble :: String -> Row Value -> Double
 rowDouble key row =
     case forceLookup key row of
       Double x -> x
+      Null -> 0
       _ -> error $ "Type error getting double " ++ key
 
 rowString :: String -> Row Value -> String
