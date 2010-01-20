@@ -406,31 +406,38 @@ handle_set_admin db rq =
                         (":is_admin", Text want_admin)] >>=
                        maybeToResponse
 
-handle_login :: MonadIO m => SQLiteHandle -> Request -> m Response
-handle_login db rq =
+{- Gives you an is_admin, real_username, cookie triple, or an error message. -}
+do_login :: MonadIO m => SQLiteHandle -> Request -> m (Either String (Bool, String, String))
+do_login db rq = 
     let uname = getInput rq "uname"
         password = getInput rq "password"
     in do r <- liftIO $ dbParamStatement db "SELECT username, is_admin FROM users WHERE lower(username) = lower(:uname) AND (password = :password OR (password ISNULL AND :password = \"\"));"
                [(":uname", Text uname),
                 (":password", Text password)]
           case r of
-            Left msg -> simpleError msg
-            Right [] -> simpleError "login failed"
-            Right [is_admin'] ->
-                let is_admin =
-                        case lookup "is_admin" is_admin' of
-                          Just (Text "1") -> True
-                          _ -> False
-                    is_admin_str = if is_admin then "1"
-                                   else ""
-                    real_uname = rowString "username" is_admin'
-                in
-                  do cookie <- liftIO $ make_login_token real_uname is_admin
-                     let newUrl = "/index.html?cookie=" ++ cookie ++ "&uname=" ++ real_uname ++ "&is_admin=" ++ is_admin_str
-                     return $ addHeader "Location" newUrl $
-                            resultBS 303 $ stringToBSL
-                                             "<html><head><title>Redirect</title></head><Body>Redirecting...</body></html>"
-            _ -> simpleError "database corrupt"
+            Left msg -> return $ Left msg
+            Right [] -> return $ Left "login failed"
+            Right [res] ->
+                let is_admin = case lookup "is_admin" res of
+                                 Just (Text "1") -> True
+                                 _ -> False
+                    real_uname = rowString "username" res
+                in do cookie <- liftIO $ make_login_token real_uname is_admin
+                      return $ Right (is_admin, real_uname, cookie)
+            _ -> return $ Left "database corrupt"
+
+handle_login :: MonadIO m => SQLiteHandle -> Request -> m Response
+handle_login db rq =
+    do r <- do_login db rq
+       case r of
+         Left msg -> simpleError msg
+         Right (is_admin, real_uname, cookie) ->
+             let is_admin_str = if is_admin then "1"
+                                else ""
+                 newUrl = "/index.html?cookie=" ++ cookie ++ "&uname=" ++ real_uname ++ "&is_admin=" ++ is_admin_str
+             in return $ addHeader "Location" newUrl $
+                         resultBS 303 $ stringToBSL
+                                      "<html><head><title>Redirect</title></head><Body>Redirecting...</body></html>"
 
 main :: IO ()
 main =
