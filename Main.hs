@@ -428,6 +428,16 @@ do_login db rq =
                       return $ Right (is_admin, real_uname, cookie)
             _ -> return $ Left "database corrupt"
 
+handle_login_raw :: MonadIO m => SQLiteHandle -> Request -> m Response
+handle_login_raw db rq =
+    do r <- do_login db rq
+       case r of
+         Left msg -> simpleError msg
+         Right (is_admin, real_uname, cookie) ->
+             simpleSuccess $ JObj [("is_admin", JBool is_admin),
+                                   ("uname", JString real_uname),
+                                   ("cookie", JString cookie)]
+
 handle_login :: MonadIO m => SQLiteHandle -> Request -> m Response
 handle_login db rq =
     do r <- do_login db rq
@@ -469,6 +479,8 @@ main =
                                     [withRequest $ handle_remove_bill db],
                                 dir "login"
                                     [withRequest $ handle_login db],
+                                dir "login_raw"
+                                    [withRequest $ handle_login_raw db],
                                 dir "remove_bill_attachment"
                                     [withRequest $ handle_remove_bill_attachment db],
                                 dir "fetch_attachment"
