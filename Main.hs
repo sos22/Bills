@@ -82,13 +82,15 @@ handle_add_bill db rq =
                                (":description", Text description),
                                (":owner", Text my_uname)]
                         case r1 of
-                          Just err -> return $ Just ("creating bill owned by " ++ my_uname ++ ": " ++ err)
+                          Just err -> return $ Left ("creating bill owned by " ++ my_uname ++ ": " ++ err)
                           Nothing ->
                               do bill <- getLastRowID db
                                  r2 <- mapM (insertPay bill) to_pay
                                  r3 <- mapM (insertReceive bill) to_receive
-                                 return $ maybeErrListToMaybeErr (r2 ++ r3)
-              maybeToResponse res
+                                 case maybeErrListToMaybeErr (r2 ++ r3) of
+                                   Just err -> return $ Left err
+                                   Nothing -> return $ Right bill
+              eitherToResponse res
 
 maximumUploadSize :: Int64
 maximumUploadSize = 500000
