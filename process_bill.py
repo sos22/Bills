@@ -124,15 +124,21 @@ class Order:
         lines = self._extract_interesting_lines(lines)
         def _parse_item(w):
             total = float(w[-1])
-            unit_price = float(w[-2])
-            if w[-3] == "Kg":
-                quantity = w[-4] + " " + w[-3]
-                quantity_n = float(w[-4])
-                name = w[:-4]
+            if w[-2] != "loose":
+                unit_price = float(w[-2])
+                if w[-3] == "Kg":
+                    quantity = w[-4] + " " + w[-3]
+                    quantity_n = float(w[-4])
+                    name = w[:-4]
+                else:
+                    quantity = w[-3]
+                    quantity_n = float(w[-3])
+                    name = w[:-3]
             else:
-                quantity = w[-3]
-                quantity_n = float(w[-3])
-                name = w[:-3]
+                quantity = "loose"
+                name = w[:-2]
+                quantity_n = 1
+                unit_price = total                
             if name[-1] == "*":
                 name = name[:-1]
             name = " ".join(name)
