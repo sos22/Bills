@@ -293,6 +293,8 @@ def assign_item_to_person(i):
 for i in order.items:
     assign_item_to_person(i)
 
+print order
+
 person_orders = {}
 for i in order.items:
     n_chargees = len(i.chargees)
@@ -331,7 +333,13 @@ cmd += "-r %s=%f " % (options.uname.capitalize(), tot_charges + delivery)
 (fd, l) = tempfile.mkstemp()
 os.close(fd)
 f = file(l, "w")
-f.write(str(order))
+
+for person in person_orders.iterkeys():
+    f.write(person.capitalize())
+    f.write("\n\n")
+    f.write(str(person_orders[person]))
+    f.write("\n\n---------------------------------------------------\n\n")
+
 f.close()
 
 cmd += "-a %s" % l
