@@ -167,19 +167,31 @@ delete_ocr_output = False
 parser.add_option("-d", "--database", help="use this item->person database",
                   dest="database", metavar="FILE",
                   default="/home/sos22/etc/tesco_bill.db")
+parser.add_option("-u", "--user", help="username to log in to the bills server",
+                  dest="uname", metavar="USERNAME")
+parser.add_option("-p", "--passwd", help="passwd to log in to the bills server",
+                  dest="passwd", metavar="PASSWORD")
+parser.add_option("-s", "--server", help="hostname of bills server",
+                  dest="server", metavar="SERVER")
 
 (options,args) = parser.parse_args()
 
 if args != []:
     print "didn't expect any positional arguments"
     sys.exit(1)
-
+if options.uname == None:
+    print "Need a username"
+    sys.exit(1)
+if options.passwd == None:
+    print "Need a password"
+    sys.exit(1)
+if options.server == None:
+    print "Need a server"
+    sys.exit(1)
+    
 try:
     f = file(options.database)
     database = cPickle.load(f)
-    for k in database.item_lookup.keys():
-        if "arthur" in database.item_lookup[k]:
-            del database.item_lookup[k]
     f.close()
 except:
     database = Database()
@@ -197,10 +209,10 @@ def yes_no_choice(prompt):
         print "Expected either y or n"
         
 while True:
+    order.add_page()
     more_pages = yes_no_choice("Another page?")
     if not more_pages:
         break
-    order.add_page()
 
 print "Date?"
 date = sys.stdin.readline().strip()
@@ -303,33 +315,27 @@ for person in person_orders.iterkeys():
     print str(person_orders[person])
     print "\n\n-------------------------------------------------\n\n"
 
-    f = file(person.capitalize(), "a")
-    f.write(date)
-    f.write("\n\n")
-    f.write(str(person_orders[person]))
-    f.write("\n\n---------------------------------------------------\n\n")
-    f.close()
-
 f = file(options.database, "w")
 cPickle.dump(database, f)
 f.close()
 
-charges = ["{\"user\": \"%s\", \"charge\": \"%s\"}" % (person.capitalize(), str(order.total()))
-           for (person, order) in person_orders.items()]
-to_pay = "[%s]" % (", ".join(charges))
+cmd = "addbill.py -u %s -p %s -s %s -d \"Tesco order\" -D %s " % (options.uname,
+                                                                  options.passwd,
+                                                                  options.server,
+                                                                  date)
 
-upload_order = {"description": "Tesco order",
-                "date": date,
-                "to_pay": to_pay,
-                "to_receive":
-                  "[{ \"user\": \"Steven\", \"charge\": \"%s\" }]" %
-                  str(tot_charges + delivery) }
+for (person, order) in person_orders.items():
+    cmd += "-P %s=%f " % (person.capitalize(), order.total())
+cmd += "-r %s=%f " % (options.uname.capitalize(), tot_charges + delivery)
 
-print upload_order
-upload_order = urllib.urlencode(upload_order)
+(fd, l) = tempfile.mkstemp()
+os.close(fd)
+f = file(l, "w")
+f.write(str(order))
+f.close()
 
-u = urllib2.urlopen("http://localhost:8000/action/add_bill", upload_order)
-r = u.read()
-print r
-u.close()
+cmd += "-a %s" % l
 
+print cmd
+
+os.system(cmd)
