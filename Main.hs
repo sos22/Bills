@@ -51,7 +51,7 @@ handle_remove_user db rq =
 getNow :: MonadIO m => m String
 getNow =
   do now <- liftIO getClockTime
-     return $ formatCalendarTime defaultTimeLocale "%Y-%m-%d" $ toUTCTime now
+     return $ formatCalendarTime defaultTimeLocale "%Y-%m-%d %H:%M" $ toUTCTime now
      
 handle_add_bill :: (MonadIO m) => SQLiteHandle -> Request -> m Response
 handle_add_bill db rq =
