@@ -44,7 +44,7 @@ function refresh_old_bills() {
     if (owned_by_me) {
 	new_contents += "<td rowspan=" + nr_to_span + " id=\"" + ident("edit") + "\" class=\"old_bill_edit\">" + action("Edit", "edit_old_bill(\"" + bi.ident + "\")") + "</td>";
 	new_contents += "<td rowspan=" + nr_to_span + " id=\"" + ident("remove") + "\" class=\"old_bill_remove\">" + action("Remove", "remove_old_bill(\"" + bi.ident + "\")") + "</td>";
-	new_contents += "<td rowspan=" + nr_to_span + "><iframe height=\"70\" frameborder=0 src=\"attach_file.html?cookie=" + cookie + "&bill=" + bi.ident + "\">No iframe support?</iframe></td>";
+	new_contents += "<td rowspan=" + nr_to_span + " id=\"" + ident("attach") + "\">" + action("Attach file", "attach_file(\"" + bi.ident + "\")") + "</td>";
     }
     new_contents += "<td rowspan=" + nr_to_span + " id=\"" + ident("clone") + "\" class=\"old_bill_clone\">" + action("Clone", "clone_old_bill(\"" + bi.ident + "\")") + "</td></tr>";
     for (index = 1; index < c.length; index++) {
@@ -217,6 +217,12 @@ function clone_old_bill(ident) {
 		      get_known_users();
 		  }
 	      });
+}
+
+function attach_file(ident) {
+    var items = $("#old_bill_" + ident + "_attach");
+    var item = items[0];
+    item.innerHTML = "<iframe height=\"70\" frameborder=0 src=\"attach_file.html?cookie=" + cookie + "&bill=" + ident + "\">No iframe support?</iframe>";
 }
 
 function remove_old_bill(ident) {
