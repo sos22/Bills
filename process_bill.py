@@ -179,6 +179,8 @@ parser.add_option("-p", "--passwd", help="passwd to log in to the bills server",
                   dest="passwd", metavar="PASSWORD")
 parser.add_option("-s", "--server", help="hostname of bills server",
                   dest="server", metavar="SERVER")
+parser.add_option("-r", "--reimburse", help="username to reimburse",
+                  dest="reimburse", metavar="USERNAME")
 
 (options,args) = parser.parse_args()
 
@@ -194,7 +196,10 @@ if options.passwd == None:
 if options.server == None:
     print "Need a server"
     sys.exit(1)
-    
+if options.reimburse == None:
+    print "Reimbursing %s" % options.uname
+    options.reimburse = options.uname
+
 try:
     f = file(options.database)
     database = cPickle.load(f)
@@ -334,7 +339,7 @@ cmd = "addbill.py -u %s -p %s -s %s -d \"Tesco order\" -D %s " % (options.uname,
 
 for (person, order) in person_orders.items():
     cmd += "-P %s=%f " % (person.capitalize(), order.total())
-cmd += "-r %s=%f " % (options.uname.capitalize(), tot_charges + delivery)
+cmd += "-r %s=%f " % (options.reimburse.capitalize(), tot_charges + delivery)
 
 (fd, l) = tempfile.mkstemp()
 os.close(fd)
