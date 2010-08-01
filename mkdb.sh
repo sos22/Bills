@@ -10,7 +10,7 @@ sq() {
 }
 
 sq "create table users(username primary key not null);"
-sq "create table bills(billident INTEGER primary key, date TEXT, description TEXT, owner TEXT REFERENCES users (username) NOT NULL);"
+sq "create table bills(billident INTEGER primary key, date TEXT, description TEXT, owner TEXT REFERENCES users (username) NOT NULL, changed TEXT);"
 sq "create table charges(bill REFERENCES bills (billident), chargeident INTEGER primary key autoincrement, user REFERENCES users(username), amount REAL);"
 
 sq "alter table users add column password;"

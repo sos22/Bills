@@ -11,6 +11,8 @@ import Control.Monad.Identity
 import Char
 import Database.SQLite
 import GHC.Int
+import System.Time
+import System.Locale
 
 import Util
 import Json
@@ -46,6 +48,11 @@ handle_remove_user db rq =
                        [(":user", Text $ getInput rq "username")]) >>=
                       maybeToResponse
 
+getNow :: MonadIO m => m String
+getNow =
+  do now <- liftIO getClockTime
+     return $ formatCalendarTime defaultTimeLocale "%Y-%m-%d" $ toUTCTime now
+     
 handle_add_bill :: (MonadIO m) => SQLiteHandle -> Request -> m Response
 handle_add_bill db rq =
     let description = getInput rq "description"
@@ -74,13 +81,15 @@ handle_add_bill db rq =
     in if abs (tot_pay - tot_recv) > 0.01
        then simpleError $ "Total payment " ++ (show tot_pay) ++ " doesn't match total receipt " ++ (show tot_recv)
        else
-           do my_uname <- whoAmI rq
+           do now <- getNow
+              my_uname <- whoAmI rq
               res <- liftIO $ sqlTransaction db $
                      do r1 <- execParamStatement_ db
-                              "INSERT into bills (\"date\", \"description\", \"owner\") values (:date, :description, :owner);"
+                              "INSERT into bills (\"date\", \"description\", \"owner\", \"changed\") values (:date, :description, :owner, :now);"
                               [(":date", Text date),
                                (":description", Text description),
-                               (":owner", Text my_uname)]
+                               (":owner", Text my_uname),
+                               (":now", Text now)]
                         case r1 of
                           Just err -> return $ Left ("creating bill owned by " ++ my_uname ++ ": " ++ err)
                           Nothing ->
@@ -243,7 +252,7 @@ handle_old_bills db _ =
                                   user = rowString "user" charge
                                   amount = rowDouble "amount" charge
                           formatBill bill =
-                              (ident, date, description, owner) where
+                              (ident, date, description, owner, changed) where
                                   ident = rowInt "billident" bill
                                   date = rowString "date" bill
                                   description = rowString "description" bill
@@ -252,6 +261,11 @@ handle_old_bills db _ =
                                         Text o -> o
                                         Null -> ""
                                         _ -> error "typing screw up getting owner of bill"
+                                  changed =
+                                    case forceLookup "changed" bill of
+                                      Text o -> o
+                                      Null -> ""
+                                      _ -> error "typing screw up getting changed time of bill"
                           formattedCharges = map formatCharge charges
                           formattedBills = map formatBill bills
                           chargesForBill bill =
@@ -259,14 +273,15 @@ handle_old_bills db _ =
                                             bc_who = user,
                                             bc_amount = amount} |
                                 (ident, bill', user, amount) <- formattedCharges, bill' == bill]
-                          mkBillEntry (ident, date, description, owner) =
+                          mkBillEntry (ident, date, description, owner, changed) =
                                let mk_be attachments =
                                        BillEntry { be_ident = fromInteger $ toInteger ident,
                                                    be_date = date,
                                                    be_description = description,
                                                    be_owner = owner,
                                                    be_charges = chargesForBill ident,
-                                                   be_attachments = attachments }
+                                                   be_attachments = attachments, 
+                                                   be_changed = changed }
                                in liftM (rightMap mk_be) $ attachmentsForBill ident db
                       in liftIO $ (liftM deEither $ mapM mkBillEntry formattedBills) >>= 
                                   eitherToResponse
@@ -288,17 +303,19 @@ handle_change_bill db rq =
       if tot_amount < -0.01 || tot_amount > 0.01
       then simpleError $ "expected total to be zero; was " ++ (show tot_amount)
       else
-          do my_uname <- whoAmI rq
+          do now <- getNow
+             my_uname <- whoAmI rq
              res <- liftIO $ sqlTransaction db $
                     do billOwner <- getBillOwner db ident
                        if billOwner /= my_uname
                         then error "You can't change other people's bills"
                         else
                             execStatements_ db $
-                                [("UPDATE bills SET date = :date, description = :description WHERE billident = :ident;",
+                                [("UPDATE bills SET date = :date, description = :description, changed = :changed WHERE billident = :ident;",
                                   [(":date", Text date),
                                    (":description", Text description),
-                                   (":ident", Int ident)]),
+                                   (":ident", Int ident),
+                                   (":changed", Text now)]),
                                  ("DELETE FROM charges WHERE bill = :billident",
                                   [(":billident", Int ident)])] ++
                                 map insertCharge charges
@@ -326,7 +343,8 @@ handle_clone_bill :: (MonadIO m) => SQLiteHandle -> Request -> m Response
 handle_clone_bill db rq =
     let ident = read $ getInput rq "id"
     in
-      do my_uname <- whoAmI rq
+      do now <- getNow
+         my_uname <- whoAmI rq
          (date, description) <- liftIO $ get_bill_date_description db ident
          charges' <- liftIO $ dbParamStatement db "SELECT \"user\", \"amount\" FROM charges WHERE bill = :ident;"
                      [(":ident", Int $ fromInteger ident)]
@@ -346,10 +364,11 @@ handle_clone_bill db rq =
                            (":amount", Double amount)]
                in do res <- liftIO $ sqlTransaction db $
                             do r1 <- execParamStatement_ db
-                                     "INSERT INTO bills (\"date\", \"description\", \"owner\") VALUES (:date, :description, :owner);"
+                                     "INSERT INTO bills (\"date\", \"description\", \"owner\", \"changed\") VALUES (:date, :description, :owner, :now);"
                                      [(":date", Text date),
                                       (":description", Text description),
-                                      (":owner", Text my_uname)]
+                                      (":owner", Text my_uname),
+                                      (":now", Text now)]
                                case r1 of
                                  Just err -> return $ Left err
                                  Nothing ->

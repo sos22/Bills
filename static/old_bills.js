@@ -18,7 +18,7 @@ function set_bill_highlight(new_highlight) {
 
 function refresh_old_bills() {
     var new_contents = "<table border=1 cellspacing=0>";
-    new_contents += "<h3><thead><tr><td>Date</td><td>Description</td><td>Created by</td><td>Charged user</td><td>Charge amount</td></tr></thead></h3>";
+    new_contents += "<h3><thead><tr><td>Date</td><td>Last changed</td><td>Description</td><td>Created by</td><td>Charged user</td><td>Charge amount</td></tr></thead></h3>";
   for (var b in old_bills) {
     var bi = old_bills[b];
     owned_by_me = bi.owner.toLowerCase() == uname.toLowerCase();
@@ -31,6 +31,7 @@ function refresh_old_bills() {
     }
     new_contents += "<tr>";
     new_contents += "<td id=\"" + ident("date") + "\" class=\"old_bill_date\">" + bi.date + "</td>";
+    new_contents += "<td id=\"" + ident("changed") + "\" class=\"old_bill_changed\">" + bi.changed + "</td>";
     new_contents += "<td id=\"" + ident("description") + "\" class=\"old_bill_description\">" + bi.description + "</td>";
     new_contents += "<td>&nbsp;" + bi.owner + "</td>";
     var c = bi.charges;

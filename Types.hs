@@ -37,7 +37,8 @@ data BillEntry = BillEntry { be_ident :: Int,
                              be_description :: String,
                              be_owner :: String,
                              be_charges :: [BillCharge],
-                             be_attachments :: [Attachment] } deriving Show
+                             be_attachments :: [Attachment], 
+                             be_changed :: String } deriving Show
 
 instance ToJSON BillEntry where
     toJSON be = JObj [("ident", JInt $ be_ident be),
@@ -45,7 +46,8 @@ instance ToJSON BillEntry where
                       ("description", JString $be_description be),
                       ("owner", JString $ be_owner be),
                       ("charges", toJSON $ be_charges be),
-                      ("attachments", toJSON $ be_attachments be)]
+                      ("attachments", toJSON $ be_attachments be),
+                      ("changed", JString $ be_changed be)]
 
 data Attachment = Attachment { at_ident :: Int64,
                                at_filename :: String }
